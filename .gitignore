@@ -1,0 +1,41 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# === Django ===
+db.sqlite3
+/media/
+staticfiles/
+static/
+
+# === Virtual environments ===
+.env/
+.venv/
+venv/
+env/
+
+# === Environment files ===
+.env
+*.env
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.iml
+
+# === OS files ===
+.DS_Store
+Thumbs.db
+
+# === Logs ===
+*.log
+
+# === Migrations cache (optional, if you want to ignore pycache in migrations) ===
+*/migrations/__pycache__/
