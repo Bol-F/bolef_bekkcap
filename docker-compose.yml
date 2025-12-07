@@ -3,10 +3,12 @@ version: "3.9"
 services:
   db:
     image: postgres:16
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: bolef_bakkcap
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 1
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -14,21 +16,18 @@ services:
 
   web:
     build: .
-    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
-    volumes:
-      - .:/app
-    ports:
-      - "8000:8000"
+    # Для прод-режима оставляем CMD из Dockerfile (gunicorn)
+    # Если хочешь dev-режим с runserver, раскомментируй команду ниже:
+    # command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    env_file:
+      - .env
     depends_on:
       - db
-    environment:
-      DB_NAME: bolef_bakkcap
-      DB_USER: postgres
-      DB_PASSWORD: 1
-      DB_HOST: db
-      DB_PORT: 5432
-      DJANGO_DEBUG: "True"
-      DJANGO_ALLOWED_HOSTS: "localhost,127.0.0.1"
+    ports:
+      - "8000:8000"
+    # Для разработки удобно монтировать код с хоста:
+    volumes:
+      - .:/app
 
 volumes:
   postgres_data:

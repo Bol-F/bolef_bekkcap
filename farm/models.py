@@ -31,7 +31,9 @@ class Field(models.Model):
 
     farm = models.ForeignKey(Farm, on_delete=models.CASCADE, related_name="fields")
     name = models.CharField(max_length=100)
-    area = models.DecimalField(max_digits=6, decimal_places=2, help_text="Field area in hectares")
+    area = models.DecimalField(
+        max_digits=6, decimal_places=2, help_text="Field area in hectares"
+    )
     soil_type = models.CharField(max_length=20, choices=SOIL_CHOICES, default="loam")
 
     def __str__(self):
@@ -68,7 +70,9 @@ class Animal(models.Model):
         max_length=50, unique=True, help_text="Unique ID for the animal (ear tag, etc.)"
     )
     birth_date = models.DateField(null=True, blank=True)
-    health_status = models.CharField(max_length=20, choices=HEALTH_CHOICES, default="good")
+    health_status = models.CharField(
+        max_length=20, choices=HEALTH_CHOICES, default="good"
+    )
 
     def __str__(self):
         return f"{self.species} #{self.tag_id}"

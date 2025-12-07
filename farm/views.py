@@ -1,28 +1,34 @@
-from rest_framework import viewsets, permissions
+from rest_framework import permissions, status, viewsets
+from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Farm, Field, Crop, Animal, ActivityLog, UserProfile
+from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
 from .serializers import (
+    ActivityLogSerializer,
+    AnimalSerializer,
+    CropSerializer,
     FarmSerializer,
     FieldSerializer,
-    CropSerializer,
-    AnimalSerializer,
-    ActivityLogSerializer,
+    RegisterSerializer,
     UserProfileSerializer,
 )
 
 
 class IsOwnerRelatedPermission(permissions.BasePermission):
     """
-    Simple permission: user must be authenticated and
-    related to the object via farm.owner or object.user/owner.
+    Объектный доступ: пользователь должен быть владельцем фермы/поля/животного/профиля.
     """
 
     def has_permission(self, request, view):
-        # Only authenticated users can access viewsets
+        # Для ViewSet'ов — только аутентифицированные
         return request.user and request.user.is_authenticated
 
     def has_object_permission(self, request, view, obj):
         user = request.user
+
+        from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
 
         if isinstance(obj, Farm):
             return obj.owner == user
@@ -47,14 +53,10 @@ class IsOwnerRelatedPermission(permissions.BasePermission):
 
 class FarmViewSet(viewsets.ModelViewSet):
     serializer_class = FarmSerializer
-    permission_classes = [IsOwnerRelatedPermission]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        user = self.request.user
-        if not user.is_authenticated:
-            # important for swagger / anonymous schema generation
-            return Farm.objects.none()
-        return Farm.objects.filter(owner=user)
+        return Farm.objects.filter(owner=self.request.user)
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -62,47 +64,34 @@ class FarmViewSet(viewsets.ModelViewSet):
 
 class FieldViewSet(viewsets.ModelViewSet):
     serializer_class = FieldSerializer
-    permission_classes = [IsOwnerRelatedPermission]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        user = self.request.user
-        if not user.is_authenticated:
-            return Field.objects.none()
-        # only fields from farms that belong to current user
-        return Field.objects.filter(farm__owner=user)
+        return Field.objects.filter(farm__owner=self.request.user)
 
 
 class CropViewSet(viewsets.ModelViewSet):
     serializer_class = CropSerializer
-    permission_classes = [IsOwnerRelatedPermission]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        user = self.request.user
-        if not user.is_authenticated:
-            return Crop.objects.none()
-        return Crop.objects.filter(field__farm__owner=user)
+        return Crop.objects.filter(field__farm__owner=self.request.user)
 
 
 class AnimalViewSet(viewsets.ModelViewSet):
     serializer_class = AnimalSerializer
-    permission_classes = [IsOwnerRelatedPermission]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        user = self.request.user
-        if not user.is_authenticated:
-            return Animal.objects.none()
-        return Animal.objects.filter(farm__owner=user)
+        return Animal.objects.filter(farm__owner=self.request.user)
 
 
 class ActivityLogViewSet(viewsets.ModelViewSet):
     serializer_class = ActivityLogSerializer
-    permission_classes = [IsOwnerRelatedPermission]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        user = self.request.user
-        if not user.is_authenticated:
-            return ActivityLog.objects.none()
-        return ActivityLog.objects.filter(farm__owner=user)
+        return ActivityLog.objects.filter(farm__owner=self.request.user)
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -110,15 +99,60 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
 
 class UserProfileViewSet(viewsets.ModelViewSet):
     serializer_class = UserProfileSerializer
-    permission_classes = [IsOwnerRelatedPermission]
+    permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        user = self.request.user
-        if not user.is_authenticated:
-            return UserProfile.objects.none()
-        # each user only sees their own profile
-        return UserProfile.objects.filter(user=user)
+        return UserProfile.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
-        # allow creating only one profile per user
+        if UserProfile.objects.filter(user=self.request.user).exists():
+            raise ValidationError("Profile for this user already exists.")
         serializer.save(user=self.request.user)
+
+
+class RegisterView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            return Response(
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "email": user.email,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LogoutView(APIView):
+    """
+    JWT logout: ожидает 'refresh' и добавляет его в blacklist.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        refresh_token = request.data.get("refresh")
+        if not refresh_token:
+            return Response(
+                {"detail": "Refresh token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+        except Exception:
+            return Response(
+                {"detail": "Invalid refresh token."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {"message": "Logged out"},
+            status=status.HTTP_205_RESET_CONTENT,
+        )

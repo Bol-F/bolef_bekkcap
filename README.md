@@ -1,41 +1,46 @@
-# Farm Management API (Django + DRF)
+# 🌾 Farm API
 
-A mini project built with **Django REST Framework** for managing farms, fields, crops, animals, activities, and user profiles.
-
-## Features
-
-- Authentication (Session + Token ready)
-- Each user has:
-  - Their own **farms**, **fields**, **crops**, **animals**
-  - A **profile** with avatar (image upload)
-- Activity logs (watering, feeding, vet check, harvesting, etc.)
-- Pagination & search (via DRF)
-- Swagger & ReDoc API documentation
-- PostgreSQL database
-- Docker & docker-compose support
+RESTful API for managing farms, fields, crops, animals, activities, and user profiles.  
+Built with **Django 6.0** and **Django REST Framework**, secured with **JWT (djangorestframework-simplejwt)** and documented via **Swagger (drf_yasg)**.
 
 ---
 
-## Tech Stack
+## 🚀 Features
 
-- Python 3.x
-- Django 6.x
-- Django REST Framework
-- PostgreSQL
-- drf-yasg (Swagger docs)
-- Docker + docker-compose (optional)
+- User registration and JWT-based authentication (access/refresh tokens)
+- CRUD operations for:
+  - Farms
+  - Fields (linked to farms)
+  - Crops (linked to fields)
+  - Animals (linked to farms)
+  - Activity logs (linked to farms, optionally to fields/crops/animals)
+  - User profile (one profile per user)
+- Per-user data isolation:
+  - Each user can access **only their own** farms, fields, crops, animals, activities, and profile
+- Automatic API documentation with Swagger and ReDoc
 
 ---
 
-## Local Setup (without Docker)
+## 🧱 Tech Stack
 
-### 1. Clone & create virtualenv
+- **Backend:** Django 6.0, Django REST Framework
+- **Auth:** djangorestframework-simplejwt
+- **Docs:** drf_yasg (Swagger / OpenAPI)
+- **Database:** SQLite (by default) or PostgreSQL (via `psycopg2`)
+- **Static files (production):** WhiteNoise
+- **Server (production):** gunicorn
+- **Images (avatars):** Pillow
 
-```bash
-git clone <your-repo-url>
-cd <your-project-folder>
+### Main Python dependencies
 
-python -m venv .venv
-source .venv/bin/activate   # on Linux/Mac
-# OR
-.venv\Scripts\activate      # on Windows
+From `requirements.txt`:
+
+```txt
+Django==6.0
+djangorestframework==3.16.1
+djangorestframework-simplejwt==5.5.1
+drf_yasg==1.21.11
+gunicorn==23.0.0
+whitenoise==6.11.0
+pillow==12.0.0
+psycopg2==2.9.11

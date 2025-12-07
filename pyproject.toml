@@ -1,135 +1,156 @@
-#[build-system]
-#requires = ["setuptools>=68.0", "wheel"]
-#build-backend = "setuptools.build_meta"
-#
-#[project]
-#name = "my-drf-project"
-#version = "0.1.0"
-#description = "A Django REST Framework API project"
-#readme = "README.md"
-#requires-python = ">=3.10"
-#license = {text = "MIT"}
-#authors = [
-#    {name = "Your Name", email = "your.email@example.com"}
-#]
-#keywords = ["django", "rest", "api", "drf"]
-#classifiers = [
-#    "Development Status :: 3 - Alpha",
-#    "Intended Audience :: Developers",
-#    "License :: OSI Approved :: MIT License",
-#    "Programming Language :: Python :: 3",
-#    "Programming Language :: Python :: 3.10",
-#    "Programming Language :: Python :: 3.11",
-#    "Programming Language :: Python :: 3.12",
-#    "Framework :: Django",
-#    "Framework :: Django :: 6.0",
-#]
-#
-#dependencies = [
-#    "django>=6.0",
-#    "djangorestframework>=3.16.1",
-#    "drf-spectacular>=0.29.0",
-#    "drf-yasg>=1.21.11",
-#    "psycopg2>=2.9.11",
-#    "pillow>=12.0.0",
-#    "pytz>=2025.2",
-#    "pyyaml>=6.0.3",
-#]
-#
-#[project.optional-dependencies]
-#dev = [
-#    "pytest>=7.4.3",
-#    "pytest-django>=4.7.0",
-#    "pytest-cov>=4.1.0",
-#    "black>=23.12.1",
-#    "flake8>=7.0.0",
-#    "isort>=5.13.2",
-#    "mypy>=1.8.0",
-#    "django-stubs>=4.2.7",
-#    "djangorestframework-stubs>=3.14.5",
-#]
-#production = [
-#    "gunicorn>=21.2.0",
-#    "whitenoise>=6.6.0",
-#    "django-redis>=5.4.0",
-#    "celery>=5.3.4",
-#    "redis>=5.0.1",
-#]
-#
-#[project.urls]
-#Homepage = "https://github.com/yourusername/my-drf-project"
-#Documentation = "https://github.com/yourusername/my-drf-project/wiki"
-#Repository = "https://github.com/yourusername/my-drf-project"
-#"Bug Tracker" = "https://github.com/yourusername/my-drf-project/issues"
-#
-#[tool.setuptools]
-#packages = ["myapp"]
-#
-#[tool.setuptools.package-data]
-#myapp = ["py.typed"]
-#
-#[tool.black]
-#line-length = 100
-#target-version = ['py310', 'py311', 'py312']
-#include = '\.pyi?$'
-#extend-exclude = '''
-#/(
-#  # directories
-#  \.eggs
-#  | \.git
-#  | \.hg
-#  | \.mypy_cache
-#  | \.tox
-#  | \.venv
-#  | build
-#  | dist
-#  | migrations
-#)/
-#'''
-#
-#[tool.isort]
-#profile = "black"
-#line_length = 100
-#multi_line_output = 3
-#include_trailing_comma = true
-#skip = ["migrations", ".venv", "venv"]
-#
-#[tool.mypy]
-#python_version = "3.10"
-#warn_return_any = true
-#warn_unused_configs = true
-#disallow_untyped_defs = true
-#plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
-#
-#[[tool.mypy.overrides]]
-#module = "*.migrations.*"
-#ignore_errors = true
-#
-#[tool.django-stubs]
-#django_settings_module = "config.settings"
-#
-#[tool.pytest.ini_options]
-#DJANGO_SETTINGS_MODULE = "config.settings"
-#python_files = ["tests.py", "test_*.py", "*_tests.py"]
-#addopts = "--cov=myapp --cov-report=html --cov-report=term-missing"
-#testpaths = ["tests"]
-#
-#[tool.coverage.run]
-#omit = [
-#    "*/migrations/*",
-#    "*/tests/*",
-#    "*/test_*.py",
-#    "*/__pycache__/*",
-#    "*/venv/*",
-#    "*/.venv/*",
-#]
-#
-#[tool.coverage.report]
-#exclude_lines = [
-#    "pragma: no cover",
-#    "def __repr__",
-#    "raise AssertionError",
-#    "raise NotImplementedError",
-#    "if __name__ == .__main__.:",
-#    "if TYPE_CHECKING:",
-#]
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "farm-api"
+version = "1.0.0"
+description = "RESTful API for managing farms, fields, crops, animals, activities, and user profiles"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"  # or: license = { text = "MIT" }
+authors = [
+    { name = "Your Name", email = "your.email@example.com" }
+]
+keywords = ["django", "rest-api", "farm-management", "agriculture", "jwt"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Django",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "Django==6.0",
+    "djangorestframework==3.16.1",
+    "djangorestframework-simplejwt==5.5.1",
+    "drf-yasg==1.21.11",
+    "drf-spectacular==0.29.0",  # keep only if you really use it
+    "gunicorn==23.0.0",
+    "pillow==12.0.0",
+    "psycopg2==2.9.11",
+    "whitenoise==6.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.0.0",
+    "ruff>=0.8.0",
+    "flake8>=7.0.0",
+    "pytest>=8.0.0",
+    "pytest-django>=4.8.0",
+]
+
+# [project.urls]
+# Homepage = "https://github.com/yourusername/farm-api"
+# Repository = "https://github.com/yourusername/farm-api"
+# Issues = "https://github.com/yourusername/farm-api/issues"
+
+[tool.setuptools]
+packages = ["farm", "config"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310", "py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.venv
+  | venv
+  | env
+  | migrations
+  | __pycache__
+  | staticfiles
+  | media
+)/
+'''
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+exclude = [
+    ".git",
+    "__pycache__",
+    "migrations",
+    "staticfiles",
+    "media",
+    ".venv",
+    "venv",
+    "env",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+ignore = [
+    "E501", # line too long (handled by black)
+    "B008", # do not perform function calls in argument defaults
+    "C901", # too complex
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["farm", "config"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.flake8]
+max-line-length = 88
+exclude = [
+    ".git",
+    "__pycache__",
+    "migrations",
+    "staticfiles",
+    "media",
+    ".venv",
+    "venv",
+    "env",
+    "Lib",
+    "Scripts",
+]
+# Игнорим то, что конфликтует с black или уже покрыто ruff
+extend-ignore = [
+    "E501",  # line too long (black handles)
+    "E203",  # whitespace before ':', black-compatible
+    "W503",  # line break before binary operator, black-compatible
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py", "*_test.py", "tests.py"]
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--disable-warnings",
+    "--tb=short",
+]
+
+[tool.coverage.run]
+source = ["farm", "config"]
+omit = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/env/*",
+    ".venv/*",
+    "manage.py",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false

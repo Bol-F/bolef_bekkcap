@@ -8,12 +8,21 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+pip-wheel-metadata/
+.python-version
 
-# === Django ===
+# === Django / DB ===
 db.sqlite3
-/media/
+*.sqlite3
+*.sqlite3-journal
+
+media/
 staticfiles/
 static/
+
+# Local Django settings (если используешь)
+local_settings.py
+settings_local.py
 
 # === Virtual environments ===
 .env/
@@ -37,5 +46,12 @@ Thumbs.db
 # === Logs ===
 *.log
 
-# === Migrations cache (optional, if you want to ignore pycache in migrations) ===
+# === Tests / coverage / linters ===
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# === Migrations cache (optional) ===
 */migrations/__pycache__/
