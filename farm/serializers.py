@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
 
 from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
 
@@ -26,23 +26,24 @@ class FarmSerializer(serializers.ModelSerializer):
 
 class FieldSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
+    farm_name = serializers.CharField(source="farm.name", read_only=True)
 
     class Meta:
         model = Field
         fields = [
             "id",
             "farm",
+            "farm_name",
             "name",
             "area",
             "soil_type",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = ["id", "farm_name"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         request = self.context.get("request")
         if request and request.user.is_authenticated:
-            # Показываем только фермы текущего пользователя
             self.fields["farm"].queryset = Farm.objects.filter(owner=request.user)
 
 
@@ -52,19 +53,21 @@ class CropSerializer(serializers.ModelSerializer):
         source="get_status_display",
         read_only=True,
     )
+    field_name = serializers.CharField(source="field.name", read_only=True)
 
     class Meta:
         model = Crop
         fields = [
             "id",
             "field",
+            "field_name",
             "name",
             "plant_date",
             "expected_harvest_date",
             "status",
             "status_display",
         ]
-        read_only_fields = ["id", "status_display"]
+        read_only_fields = ["id", "status_display", "field_name"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -81,19 +84,21 @@ class AnimalSerializer(serializers.ModelSerializer):
         source="get_health_status_display",
         read_only=True,
     )
+    farm_name = serializers.CharField(source="farm.name", read_only=True)
 
     class Meta:
         model = Animal
         fields = [
             "id",
             "farm",
+            "farm_name",
             "species",
             "tag_id",
             "birth_date",
             "health_status",
             "health_status_display",
         ]
-        read_only_fields = ["id", "health_status_display"]
+        read_only_fields = ["id", "health_status_display", "farm_name"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -121,21 +126,32 @@ class ActivityLogSerializer(serializers.ModelSerializer):
     )
     created_by = serializers.ReadOnlyField(source="created_by.username")
 
+    # Add display names for better API responses
+    farm_name = serializers.CharField(source="farm.name", read_only=True)
+    field_name = serializers.CharField(source="field.name", read_only=True, allow_null=True)
+    crop_name = serializers.CharField(source="crop.name", read_only=True, allow_null=True)
+    animal_tag = serializers.CharField(source="animal.tag_id", read_only=True, allow_null=True)
+
     class Meta:
         model = ActivityLog
         fields = [
             "id",
             "farm",
+            "farm_name",
             "date",
             "activity_type",
             "description",
             "field",
+            "field_name",
             "crop",
+            "crop_name",
             "animal",
+            "animal_tag",
             "created_by",
             "created_at",
         ]
-        read_only_fields = ["id", "created_by", "created_at"]
+        read_only_fields = ["id", "created_by", "created_at", "farm_name",
+                            "field_name", "crop_name", "animal_tag"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -153,50 +169,90 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             self.fields["animal"].queryset = user_animals
 
     def validate(self, attrs):
-        """
-        Дополнительное правило: field/crop/animal (если заданы)
-        должны принадлежать той же ферме, что и farm.
-        """
         farm = attrs.get("farm")
         field = attrs.get("field")
         crop = attrs.get("crop")
         animal = attrs.get("animal")
 
         if field and field.farm != farm:
-            raise ValidationError("Field does not belong to the selected farm.")
+            raise serializers.ValidationError("Field does not belong to the selected farm.")
         if crop and crop.field.farm != farm:
-            raise ValidationError("Crop does not belong to the selected farm.")
+            raise serializers.ValidationError("Crop does not belong to the selected farm.")
         if animal and animal.farm != farm:
-            raise ValidationError("Animal does not belong to the selected farm.")
+            raise serializers.ValidationError("Animal does not belong to the selected farm.")
 
         return attrs
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
     user = serializers.ReadOnlyField(source="user.username")
+    email = serializers.EmailField(source="user.email", read_only=True)
 
     class Meta:
         model = UserProfile
-        fields = ["id", "user", "avatar", "bio", "phone"]
-        read_only_fields = ["id", "user"]
+        fields = ["id", "user", "email", "avatar", "bio", "phone"]
+        read_only_fields = ["id", "user", "email"]
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
-    password2 = serializers.CharField(write_only=True)
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        trim_whitespace=False,
+        style={"input_type": "password"},
+    )
+    password2 = serializers.CharField(
+        write_only=True,
+        trim_whitespace=False,
+        style={"input_type": "password"},
+    )
 
     class Meta:
         model = User
         fields = ("id", "username", "email", "password", "password2")
+        read_only_fields = ("id",)
+
+    def validate_username(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Username is required.")
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError("Username already exists.")
+        return value
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        if not value:
+            raise serializers.ValidationError("Email is required.")
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("Email already exists.")
+        return value
 
     def validate(self, attrs):
         if attrs["password"] != attrs["password2"]:
-            raise serializers.ValidationError({"password": "Passwords must match."})
-        validate_password(attrs["password"])
+            raise serializers.ValidationError({"password2": "Passwords must match."})
+
+        # Validate password using Django's password validators
+        try:
+            validate_password(attrs["password"])
+        except DjangoValidationError as e:
+            raise serializers.ValidationError({"password": list(e.messages)})
+
         return attrs
 
     def create(self, validated_data):
         validated_data.pop("password2")
         password = validated_data.pop("password")
-        user = User.objects.create_user(password=password, **validated_data)
+
+        # Create user first
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data['email'],
+            password=password
+        )
+
+        # Create user profile automatically
+        UserProfile.objects.create(user=user)
+
         return user

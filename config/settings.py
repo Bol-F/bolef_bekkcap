@@ -2,18 +2,37 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# === БАЗОВЫЕ НАСТРОЙКИ ===
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Quick-start development settings - unsuitable for production
-# SECURITY WARNING: keep the secret key used in production secret!
+# Если используешь python-dotenv — подгружаем .env
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    # Если python-dotenv не установлен — просто игнорируем,
+    # тогда переменные нужно задавать через системные env.
+    pass
+
+# SECRET_KEY из .env (или небезопасный дефолт для dev)
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-default-key")
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
-ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
+# DEBUG: по умолчанию False (на сервере)
+DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 
-# Application definition
+# ALLOWED_HOSTS читаем из .env, список через запятую
+# Пример: DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost,evosuzz.pythonanywhere.com
+ALLOWED_HOSTS = os.getenv(
+    "DJANGO_ALLOWED_HOSTS",
+    "127.0.0.1,localhost"
+).split(",")
+
+# CORS: можно включать/выключать через .env
+CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "True").lower() == "true"
+
+# === ПРИЛОЖЕНИЯ ===
 
 INSTALLED_APPS = [
     # Django default apps
@@ -23,11 +42,14 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+
     # Third-party apps
     "rest_framework",
     "rest_framework.authtoken",
     "rest_framework_simplejwt.token_blacklist",
     "drf_yasg",
+    "corsheaders",
+
     # Local apps
     "farm",
 ]
@@ -36,7 +58,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    # "django.middleware.locale.LocaleMiddleware",
+    "corsheaders.middleware.CorsMiddleware",  # CORS должен идти рано
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -63,11 +85,12 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# Database
-# PostgreSQL config – make sure DB exists and credentials are correct.
+# === БАЗА ДАННЫХ ===
+# Всё берём из .env чтобы и локально, и на сервере было одинаково
+
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": os.getenv("DB_ENGINE", "django.db.backends.postgresql"),
         "NAME": os.getenv("DB_NAME", "bolef_bakkcap"),
         "USER": os.getenv("DB_USER", "postgres"),
         "PASSWORD": os.getenv("DB_PASSWORD", "1"),
@@ -76,7 +99,7 @@ DATABASES = {
     }
 }
 
-# Password validation
+# === ВАЛИДАЦИЯ ПАРОЛЕЙ ===
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -93,27 +116,26 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Internationalization
+# === ЛОКАЛИЗАЦИЯ ===
 
 LANGUAGE_CODE = "en-us"
-
-# You’re in Uzbekistan, so this is better:
 TIME_ZONE = "Asia/Tashkent"
 
 USE_I18N = True
 USE_TZ = True
 
-# Static & media files
+# === STATIC / MEDIA ===
 
 STATIC_URL = "/static/"
-
-# Uncomment STATIC_ROOT when you deploy
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+MEDIA_ROOT = BASE_DIR / "media"
 
-# DRF settings
+# WhiteNoise для статики
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# === DRF / JWT ===
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -121,8 +143,9 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ],
+    # Пока для удобства разработки:
     "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",
+        "rest_framework.permissions.AllowAny",
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10,
@@ -132,14 +155,11 @@ REST_FRAMEWORK = {
     ],
 }
 
-# Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
-
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=10),  # <-- 10 минут
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),  # например 1 день
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=20),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
 }
