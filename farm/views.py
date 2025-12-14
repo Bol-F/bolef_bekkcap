@@ -1,4 +1,4 @@
-from rest_framework import permissions, status, viewsets
+from rest_framework import permissions, viewsets
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -56,7 +56,15 @@ class FarmViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        return Farm.objects.filter(owner=self.request.user)
+        # drf_yasg calls view without auth during schema generation
+        if getattr(self, "swagger_fake_view", False):
+            return Farm.objects.none()
+
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Farm.objects.none()
+
+        return Farm.objects.filter(owner=user)
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -67,7 +75,14 @@ class FieldViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        return Field.objects.filter(farm__owner=self.request.user)
+        if getattr(self, "swagger_fake_view", False):
+            return Field.objects.none()
+
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Field.objects.none()
+
+        return Field.objects.filter(farm__owner=user)
 
 
 class CropViewSet(viewsets.ModelViewSet):
@@ -75,7 +90,14 @@ class CropViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        return Crop.objects.filter(field__farm__owner=self.request.user)
+        if getattr(self, "swagger_fake_view", False):
+            return Crop.objects.none()
+
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Crop.objects.none()
+
+        return Crop.objects.filter(field__farm__owner=user)
 
 
 class AnimalViewSet(viewsets.ModelViewSet):
@@ -83,7 +105,14 @@ class AnimalViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        return Animal.objects.filter(farm__owner=self.request.user)
+        if getattr(self, "swagger_fake_view", False):
+            return Animal.objects.none()
+
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Animal.objects.none()
+
+        return Animal.objects.filter(farm__owner=user)
 
 
 class ActivityLogViewSet(viewsets.ModelViewSet):
@@ -91,7 +120,14 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        return ActivityLog.objects.filter(farm__owner=self.request.user)
+        if getattr(self, "swagger_fake_view", False):
+            return ActivityLog.objects.none()
+
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return ActivityLog.objects.none()
+
+        return ActivityLog.objects.filter(farm__owner=user)
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -102,7 +138,14 @@ class UserProfileViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsOwnerRelatedPermission]
 
     def get_queryset(self):
-        return UserProfile.objects.filter(user=self.request.user)
+        if getattr(self, "swagger_fake_view", False):
+            return UserProfile.objects.none()
+
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return UserProfile.objects.none()
+
+        return UserProfile.objects.filter(user=user)
 
     def perform_create(self, serializer):
         if UserProfile.objects.filter(user=self.request.user).exists():
@@ -119,13 +162,19 @@ class RegisterView(APIView):
             user = serializer.save()
             return Response(
                 {
-                    "id": user.id,
-                    "username": user.username,
+                    "detail": "Registered, but email sending failed. Check SMTP settings and try resend.",
                     "email": user.email,
                 },
-                status=status.HTTP_201_CREATED,
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                "detail": "Registered. Verification code sent to email.",
+                "email": user.email,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class LogoutView(APIView):
@@ -156,3 +205,27 @@ class LogoutView(APIView):
             {"message": "Logged out"},
             status=status.HTTP_205_RESET_CONTENT,
         )
+
+
+from allauth.account.models import EmailAddress
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def me(request):
+    user = request.user
+    verified = EmailAddress.objects.filter(
+        user=user, email=user.email, verified=True
+    ).exists()
+    return Response(
+        {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "is_active": user.is_active,
+            "email_verified": verified,
+        }
+    )

@@ -189,6 +189,14 @@ class RegisterSerializer(serializers.ModelSerializer):
         model = User
         fields = ("id", "username", "email", "password", "password2")
 
+    def validate_email(self, value):
+        email = (value or "").strip().lower()
+        if not email:
+            raise serializers.ValidationError("Email is required.")
+        if User.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError("User with this email already exists.")
+        return email
+
     def validate(self, attrs):
         if attrs["password"] != attrs["password2"]:
             raise serializers.ValidationError({"password": "Passwords must match."})
@@ -196,7 +204,23 @@ class RegisterSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        validated_data.pop("password2")
+        validated_data.pop("password2", None)
         password = validated_data.pop("password")
         user = User.objects.create_user(password=password, **validated_data)
         return user
+
+
+class BaseRegisterSerializer(serializers.Serializer):
+    """
+    База для регистрации:
+    - нормализует email
+    - запрещает дубликат email
+    """
+
+    def validate_email(self, value: str) -> str:
+        email = (value or "").strip().lower()
+        if not email:
+            raise serializers.ValidationError("Email is required.")
+        if User.objects.filter(email__iexact=email).exists():
+            raise serializers.ValidationError("User with this email already exists.")
+        return email

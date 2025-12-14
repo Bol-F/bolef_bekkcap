@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Google OAuth Callback</title>
+</head>
+<body>
+<h2>Google OAuth Callback</h2>
+<pre id="out">Loading...</pre>
+
+<script>
+    const out = document.getElementById("out");
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+
+    if (!code) {
+        out.textContent = "No code in URL";
+    } else {
+        // отправляем code на backend, backend сам обменяет на токены у Google
+        fetch("/auth/google/exchange/", {
+            method: "POST",
+            headers: {"Content-Type": "application/json", "Accept": "application/json"},
+            body: JSON.stringify({code})
+        })
+            .then(async (resp) => {
+                const text = await resp.text();
+                out.textContent = `Exchange HTTP ${resp.status}\n\n` + text;
+
+                if (!resp.ok) return;
+
+                // backend вернёт access_token / id_token от Google
+                const tokenData = JSON.parse(text);
+
+                // теперь отправим Google access_token в dj-rest-auth/google/
+                return fetch("/dj-rest-auth/google/", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json", "Accept": "application/json"},
+                    body: JSON.stringify({access_token: tokenData.access_token})
+                });
+            })
+            .then(async (resp) => {
+                if (!resp) return;
+                const text = await resp.text();
+                out.textContent += `\n\nBackend login HTTP ${resp.status}\n\n` + text;
+
+                if (resp.ok) {
+                    try {
+                        const data = JSON.parse(text);
+                        localStorage.setItem("access", data.access);
+                        localStorage.setItem("refresh", data.refresh);
+                    } catch (e) {
+                    }
+                }
+            })
+            .catch(e => out.textContent = "Error: " + e);
+    }
+</script>
+</body>
+</html>
