@@ -72,10 +72,7 @@ def send_email_code(request):
     if not qs.exists():
         return Response({"detail": "User with this email not found"}, status=404)
     if qs.count() > 1:
-        return Response(
-            {"detail": "Multiple users with this email. Fix duplicates in DB."},
-            status=409,
-        )
+        return Response({"detail": "Multiple users with this email. Fix duplicates in DB."}, status=409)
 
     user = qs.first()
 
@@ -104,10 +101,7 @@ def verify_email_code(request):
     if not qs.exists():
         return Response({"detail": "User with this email not found"}, status=404)
     if qs.count() > 1:
-        return Response(
-            {"detail": "Multiple users with this email. Fix duplicates in DB."},
-            status=409,
-        )
+        return Response({"detail": "Multiple users with this email. Fix duplicates in DB."}, status=409)
 
     user = qs.first()
 
@@ -117,9 +111,7 @@ def verify_email_code(request):
         .first()
     )
     if not otp:
-        return Response(
-            {"detail": "No active code found. Send a new code."}, status=400
-        )
+        return Response({"detail": "No active code found. Send a new code."}, status=400)
 
     if otp.is_expired():
         otp.used = True

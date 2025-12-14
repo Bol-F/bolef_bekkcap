@@ -1,10 +1,6 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-    TokenVerifyView,
-)
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenVerifyView
 
 from .auth_views import set_password
 from .views import (
@@ -36,6 +32,7 @@ urlpatterns = [
     path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
     path("auth/me/", me, name="auth-me"),
     path("auth/set-password/", set_password, name="auth-set-password"),
+
     # API resources
     path("", include(router.urls)),
 ]
