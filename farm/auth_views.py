@@ -9,7 +9,9 @@ from django.views.decorators.http import require_POST
 
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
-from allauth.socialaccount.providers.oauth2.client import OAuth2Client as AllauthOAuth2Client
+from allauth.socialaccount.providers.oauth2.client import (
+    OAuth2Client as AllauthOAuth2Client,
+)
 from dj_rest_auth.registration.views import SocialLoginView
 
 from django.contrib.auth.password_validation import validate_password
@@ -49,7 +51,9 @@ def exchange_google_code(request):
     try:
         app = SocialApp.objects.get(provider="google")
     except SocialApp.DoesNotExist:
-        return JsonResponse({"detail": "SocialApp(provider='google') not configured"}, status=500)
+        return JsonResponse(
+            {"detail": "SocialApp(provider='google') not configured"}, status=500
+        )
 
     redirect_uri = getattr(
         settings,
@@ -72,7 +76,10 @@ def exchange_google_code(request):
     try:
         token_data = token_resp.json()
     except Exception:
-        return JsonResponse({"detail": "Google token response not JSON", "raw": token_resp.text}, status=500)
+        return JsonResponse(
+            {"detail": "Google token response not JSON", "raw": token_resp.text},
+            status=500,
+        )
 
     if token_resp.status_code != 200:
         return JsonResponse({"google_error": token_data}, status=400)
