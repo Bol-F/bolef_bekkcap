@@ -35,10 +35,6 @@ class GoogleLogin(SocialLoginView):
 @csrf_exempt
 @require_POST
 def exchange_google_code(request):
-    """
-    POST {"code": "..."}
-    Exchanges code -> access_token/id_token using SocialApp credentials.
-    """
     try:
         data = json.loads(request.body.decode("utf-8") or "{}")
     except Exception:
@@ -90,11 +86,6 @@ def exchange_google_code(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def set_password(request):
-    """
-    POST {"password":"...", "password2":"..."}
-    Requires: Authorization: Bearer <access>
-    Works for Google-created users too.
-    """
     password = request.data.get("password") or ""
     password2 = request.data.get("password2") or ""
 
@@ -102,7 +93,6 @@ def set_password(request):
         return Response({"detail": "Passwords do not match"}, status=400)
 
     validate_password(password, request.user)
-
     request.user.set_password(password)
     request.user.save(update_fields=["password"])
 

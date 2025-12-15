@@ -8,50 +8,42 @@ from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
 User = get_user_model()
 
 
+# ==========================
+# Farm
+# ==========================
 class FarmSerializer(serializers.ModelSerializer):
     owner = serializers.ReadOnlyField(source="owner.username")
 
     class Meta:
         model = Farm
-        fields = [
-            "id",
-            "owner",
-            "name",
-            "location",
-            "size_hectares",
-            "created_at",
-        ]
+        fields = ["id", "owner", "name", "location", "size_hectares", "created_at"]
         read_only_fields = ["id", "owner", "created_at"]
 
 
+# ==========================
+# Field
+# ==========================
 class FieldSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
 
     class Meta:
         model = Field
-        fields = [
-            "id",
-            "farm",
-            "name",
-            "area",
-            "soil_type",
-        ]
+        fields = ["id", "farm", "name", "area", "soil_type"]
         read_only_fields = ["id"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         request = self.context.get("request")
         if request and request.user.is_authenticated:
-            # Показываем только фермы текущего пользователя
             self.fields["farm"].queryset = Farm.objects.filter(owner=request.user)
 
 
+# ==========================
+# Crop
+# ==========================
 class CropSerializer(serializers.ModelSerializer):
     field = serializers.PrimaryKeyRelatedField(queryset=Field.objects.all())
-    status_display = serializers.CharField(
-        source="get_status_display",
-        read_only=True,
-    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = Crop
@@ -75,11 +67,13 @@ class CropSerializer(serializers.ModelSerializer):
             )
 
 
+# ==========================
+# Animal
+# ==========================
 class AnimalSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
     health_status_display = serializers.CharField(
-        source="get_health_status_display",
-        read_only=True,
+        source="get_health_status_display", read_only=True
     )
 
     class Meta:
@@ -102,22 +96,19 @@ class AnimalSerializer(serializers.ModelSerializer):
             self.fields["farm"].queryset = Farm.objects.filter(owner=request.user)
 
 
+# ==========================
+# ActivityLog
+# ==========================
 class ActivityLogSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
     field = serializers.PrimaryKeyRelatedField(
-        queryset=Field.objects.all(),
-        required=False,
-        allow_null=True,
+        queryset=Field.objects.all(), required=False, allow_null=True
     )
     crop = serializers.PrimaryKeyRelatedField(
-        queryset=Crop.objects.all(),
-        required=False,
-        allow_null=True,
+        queryset=Crop.objects.all(), required=False, allow_null=True
     )
     animal = serializers.PrimaryKeyRelatedField(
-        queryset=Animal.objects.all(),
-        required=False,
-        allow_null=True,
+        queryset=Animal.objects.all(), required=False, allow_null=True
     )
     created_by = serializers.ReadOnlyField(source="created_by.username")
 
@@ -142,36 +133,33 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if request and request.user.is_authenticated:
             user = request.user
-            user_farms = Farm.objects.filter(owner=user)
-            user_fields = Field.objects.filter(farm__owner=user)
-            user_crops = Crop.objects.filter(field__farm__owner=user)
-            user_animals = Animal.objects.filter(farm__owner=user)
-
-            self.fields["farm"].queryset = user_farms
-            self.fields["field"].queryset = user_fields
-            self.fields["crop"].queryset = user_crops
-            self.fields["animal"].queryset = user_animals
+            self.fields["farm"].queryset = Farm.objects.filter(owner=user)
+            self.fields["field"].queryset = Field.objects.filter(farm__owner=user)
+            self.fields["crop"].queryset = Crop.objects.filter(field__farm__owner=user)
+            self.fields["animal"].queryset = Animal.objects.filter(farm__owner=user)
 
     def validate(self, attrs):
         """
-        Дополнительное правило: field/crop/animal (если заданы)
-        должны принадлежать той же ферме, что и farm.
+        Rule: if field/crop/animal provided, they must belong to the same farm.
         """
         farm = attrs.get("farm")
         field = attrs.get("field")
         crop = attrs.get("crop")
         animal = attrs.get("animal")
 
-        if field and field.farm != farm:
+        if field and field.farm_id != farm.id:
             raise ValidationError("Field does not belong to the selected farm.")
-        if crop and crop.field.farm != farm:
+        if crop and crop.field.farm_id != farm.id:
             raise ValidationError("Crop does not belong to the selected farm.")
-        if animal and animal.farm != farm:
+        if animal and animal.farm_id != farm.id:
             raise ValidationError("Animal does not belong to the selected farm.")
 
         return attrs
 
 
+# ==========================
+# UserProfile
+# ==========================
 class UserProfileSerializer(serializers.ModelSerializer):
     user = serializers.ReadOnlyField(source="user.username")
 
@@ -181,6 +169,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "user"]
 
 
+# ==========================
+# Registration (optional)
+# ==========================
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     password2 = serializers.CharField(write_only=True)
@@ -206,15 +197,14 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("password2", None)
         password = validated_data.pop("password")
-        user = User.objects.create_user(password=password, **validated_data)
-        return user
+        return User.objects.create_user(password=password, **validated_data)
 
 
 class BaseRegisterSerializer(serializers.Serializer):
     """
-    База для регистрации:
-    - нормализует email
-    - запрещает дубликат email
+    Base for registration:
+    - normalizes email
+    - blocks duplicate email
     """
 
     def validate_email(self, value: str) -> str:

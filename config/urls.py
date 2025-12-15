@@ -8,6 +8,7 @@ from drf_yasg import openapi
 from drf_yasg.views import get_schema_view
 from rest_framework import permissions
 
+# ✅ реальные импорты
 from farm.auth_views import GoogleLogin, exchange_google_code
 from farm.email_otp_views import send_email_code, verify_email_code
 
@@ -28,11 +29,12 @@ urlpatterns = [
     # Auth (dj-rest-auth)
     path("dj-rest-auth/", include("dj_rest_auth.urls")),
     path("dj-rest-auth/registration/", include("dj_rest_auth.registration.urls")),
+    # Google OAuth
     path("dj-rest-auth/google/", GoogleLogin.as_view(), name="google_login"),
-    # Google OAuth helpers
     path(
         "auth/google/callback/",
         TemplateView.as_view(template_name="google_callback.html"),
+        name="google_callback",
     ),
     path("auth/google/exchange/", exchange_google_code, name="google_exchange"),
     # Email OTP
@@ -50,11 +52,11 @@ urlpatterns = [
         name="schema-swagger-ui",
     ),
     path("redoc/", schema_view.with_ui("redoc", cache_timeout=0), name="schema-redoc"),
+    path("api-auth/", include("rest_framework.urls")),
 ]
 
-# Only include if you really use allauth HTML pages.
-# If you don't need browser pages, you can remove this line safely.
-if env := getattr(settings, "ENABLE_ALLAUTH_PAGES", False):
+# allauth HTML pages (optional)
+if getattr(settings, "ENABLE_ALLAUTH_PAGES", False):
     urlpatterns += [path("accounts/", include("allauth.urls"))]
 
 if settings.DEBUG:
