@@ -1,23 +1,23 @@
 import json
+
 import requests
-
-from django.conf import settings
-from django.http import JsonResponse
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
-
 from allauth.socialaccount.models import SocialApp
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import (
     OAuth2Client as AllauthOAuth2Client,
 )
 from dj_rest_auth.registration.views import SocialLoginView
-
-from django.contrib.auth.password_validation import validate_password
+from django.conf import settings
+from django.http import JsonResponse
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
+from .serializers import SetPasswordSerializer
 
 
 class PatchedOAuth2Client(AllauthOAuth2Client):
@@ -86,14 +86,12 @@ def exchange_google_code(request):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def set_password(request):
-    password = request.data.get("password") or ""
-    password2 = request.data.get("password2") or ""
+    serializer = SetPasswordSerializer(data=request.data, context={"request": request})
+    serializer.is_valid(raise_exception=True)
 
-    if password != password2:
-        return Response({"detail": "Passwords do not match"}, status=400)
+    password = serializer.validated_data["password"]
 
-    validate_password(password, request.user)
     request.user.set_password(password)
     request.user.save(update_fields=["password"])
 
-    return Response({"detail": "Password set"}, status=200)
+    return Response({"detail": "Password set"}, status=status.HTTP_200_OK)

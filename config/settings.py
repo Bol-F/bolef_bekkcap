@@ -1,3 +1,4 @@
+# config/settings.py
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -8,6 +9,9 @@ from dotenv import load_dotenv
 # BASE
 # =============================================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load .env if exists (works for manage.py shell + local; on PythonAnywhere
+# it's still better to set env vars in Web tab)
 load_dotenv(BASE_DIR / ".env")
 
 
@@ -16,22 +20,37 @@ def env_bool(name: str, default: bool = False) -> bool:
 
 
 def env_list(name: str, default: str = "") -> list[str]:
-    raw = os.getenv(name, default)
+    raw = os.getenv(name, default) or ""
     return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)).strip())
+    except Exception:
+        return default
 
 
 # =============================================================================
 # SECURITY
 # =============================================================================
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-default-key")
-DEBUG = env_bool("DJANGO_DEBUG", False)
-ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
+DEBUG = env_bool("DJANGO_DEBUG", True)
+
+_raw_hosts = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
+ALLOWED_HOSTS = ["*"] if ("*" in _raw_hosts) else _raw_hosts
+
+# USE_X_FORWARDED_HOST = env_bool("USE_X_FORWARDED_HOST", False)
+# SECURE_PROXY_SSL_HEADER = (
+#     ("HTTP_X_FORWARDED_PROTO", "https")
+#     if env_bool("SECURE_PROXY_SSL_HEADER", False)
+#     else None
+# )
 
 # =============================================================================
 # APPS
 # =============================================================================
 INSTALLED_APPS = [
-    # Django
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -84,7 +103,7 @@ TEMPLATES = [
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
-                "django.template.context_processors.request",  # required by allauth
+                "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ],
@@ -97,19 +116,27 @@ WSGI_APPLICATION = "config.wsgi.application"
 # =============================================================================
 # DATABASE
 # =============================================================================
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME", "bolef_bakkcap"),
-        "USER": os.getenv("DB_USER", "postgres"),
-        "PASSWORD": os.getenv("DB_PASSWORD", "1"),
-        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
-        "PORT": os.getenv("DB_PORT", "5432"),
-        "OPTIONS": {
-            "client_encoding": "UTF8",
-        },
+DB_ENGINE = (os.getenv("DB_ENGINE", "sqlite") or "sqlite").strip().lower()
+
+if DB_ENGINE in ("postgres", "postgresql"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("DB_NAME", "bolef_bakkcap"),
+            "USER": os.getenv("DB_USER", "postgres"),
+            "PASSWORD": os.getenv("DB_PASSWORD", "1"),
+            "HOST": os.getenv("DB_HOST", "127.0.0.1"),
+            "PORT": os.getenv("DB_PORT", "5432"),
+            "OPTIONS": {"client_encoding": "UTF8"},
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 # =============================================================================
 # AUTH / PASSWORDS
@@ -128,7 +155,7 @@ AUTHENTICATION_BACKENDS = [
     "allauth.account.auth_backends.AuthenticationBackend",
 ]
 
-SITE_ID = int(os.getenv("SITE_ID", "1"))
+SITE_ID = env_int("SITE_ID", 1)
 
 # =============================================================================
 # INTERNATIONALIZATION
@@ -151,22 +178,24 @@ MEDIA_ROOT = BASE_DIR / "media"
 # =============================================================================
 # CORS / CSRF
 # =============================================================================
-CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", False)
+CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", True)
+CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "")
-CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "")
+
+# CSRF_TRUSTED_ORIGINS = env_list(
+#     "CSRF_TRUSTED_ORIGINS",
+#     "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000",
+# )
 
 # =============================================================================
 # DRF
 # =============================================================================
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        # "rest_framework.authentication.SessionAuthentication",
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ],
-    "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",
-    ],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10,
     "DEFAULT_FILTER_BACKENDS": [
@@ -188,52 +217,83 @@ SIMPLE_JWT = {
 # =============================================================================
 # dj-rest-auth
 # =============================================================================
-REST_AUTH = {
-    "USE_JWT": True,
-    "JWT_AUTH_HTTPONLY": False,
-}
+REST_AUTH = {"USE_JWT": True, "JWT_AUTH_HTTPONLY": False}
 
 # =============================================================================
 # allauth
 # =============================================================================
 ACCOUNT_LOGIN_METHODS = {"email", "username"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "username*", "password1*", "password2*"]
-
 ACCOUNT_EMAIL_VERIFICATION = os.getenv("ACCOUNT_EMAIL_VERIFICATION", "none")
 
 SOCIALACCOUNT_QUERY_EMAIL = True
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_EMAIL_REQUIRED = True
+
 SOCIALACCOUNT_PROVIDERS = {
     "google": {
-        "SCOPE": ["profile", "email", "openid"],
+        "SCOPE": ["profile", "email"],
         "AUTH_PARAMS": {"access_type": "online"},
+        "VERIFIED_EMAIL": True,
     }
 }
 
-LOGIN_REDIRECT_URL = "/"
-ACCOUNT_LOGOUT_REDIRECT_URL = "/"
+LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "/")
+ACCOUNT_LOGOUT_REDIRECT_URL = os.getenv("ACCOUNT_LOGOUT_REDIRECT_URL", "/")
 
-GOOGLE_REDIRECT_URI = os.getenv(
-    "GOOGLE_REDIRECT_URI",
-    "http://127.0.0.1:8000/auth/google/callback/",
-)
+# GOOGLE_REDIRECT_URI = os.getenv(
+#     "GOOGLE_REDIRECT_URI",
+#     "http://127.0.0.1:8000/auth/google/callback/",
+# )
 
 ENABLE_ALLAUTH_PAGES = env_bool("ENABLE_ALLAUTH_PAGES", False)
 
 # =============================================================================
 # EMAIL (SMTP)
 # =============================================================================
+# Supports both naming styles:
+# - SMTP_USER / SMTP_PASSWORD  (your current .env)
+# - EMAIL_HOST_USER / EMAIL_HOST_PASSWORD (django style)
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
 )
-EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
-EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
-EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
 
-EMAIL_HOST_USER = os.getenv("SMTP_USER", "")
-EMAIL_HOST_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-DEFAULT_FROM_EMAIL = os.getenv(
-    "DEFAULT_FROM_EMAIL", EMAIL_HOST_USER or "no-reply@bolef.local"
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = env_int("EMAIL_PORT", 587)
+
+EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)  # for port 465 обычно True
+
+EMAIL_TIMEOUT = env_int("EMAIL_TIMEOUT", 20)  # seconds
+
+EMAIL_HOST_USER = (os.getenv("EMAIL_HOST_USER") or os.getenv("SMTP_USER") or "").strip()
+EMAIL_HOST_PASSWORD = (
+    os.getenv("EMAIL_HOST_PASSWORD") or os.getenv("SMTP_PASSWORD") or ""
 )
+
+DEFAULT_FROM_EMAIL = (
+    os.getenv("DEFAULT_FROM_EMAIL") or EMAIL_HOST_USER or "no-reply@bolef.local"
+).strip()
+SERVER_EMAIL = os.getenv("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
+
+# =============================================================================
+# LOGGING (важно для отладки email)
+# =============================================================================
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "loggers": {
+        # Покажет ошибки отправки email в error log PythonAnywhere
+        "django.core.mail": {
+            "handlers": ["console"],
+            "level": "DEBUG",
+            "propagate": True,
+        },
+    },
+}
 
 # =============================================================================
 # MISC

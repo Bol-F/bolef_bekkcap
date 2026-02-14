@@ -1,8 +1,9 @@
 from django.contrib.auth import get_user_model
-from django.contrib.auth.password_validation import validate_password
-from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework import serializers
 from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
 
 User = get_user_model()
@@ -200,17 +201,48 @@ class RegisterSerializer(serializers.ModelSerializer):
         return User.objects.create_user(password=password, **validated_data)
 
 
-class BaseRegisterSerializer(serializers.Serializer):
-    """
-    Base for registration:
-    - normalizes email
-    - blocks duplicate email
-    """
+# ==========================
+# Password Reset (OTP via email)
+# ==========================
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
 
-    def validate_email(self, value: str) -> str:
-        email = (value or "").strip().lower()
-        if not email:
-            raise serializers.ValidationError("Email is required.")
-        if User.objects.filter(email__iexact=email).exists():
-            raise serializers.ValidationError("User with this email already exists.")
-        return email
+    def validate_email(self, value):
+        return (value or "").strip().lower()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=10)
+    new_password = serializers.CharField(write_only=True)
+    new_password2 = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["new_password2"]:
+            raise serializers.ValidationError({"new_password": "Passwords must match."})
+        validate_password(attrs["new_password"])
+        attrs["email"] = (attrs["email"] or "").strip().lower()
+        attrs["code"] = (attrs["code"] or "").strip()
+        return attrs
+
+
+class SetPasswordSerializer(serializers.Serializer):
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
+    password2 = serializers.CharField(write_only=True, trim_whitespace=False)
+
+    def validate(self, attrs):
+        password = attrs.get("password") or ""
+        password2 = attrs.get("password2") or ""
+
+        if password != password2:
+            raise serializers.ValidationError({"password2": "Passwords do not match."})
+
+        user = self.context["request"].user
+
+        try:
+            validate_password(password, user)
+        except DjangoValidationError as e:
+            # Convert Django password validator errors -> DRF field errors
+            raise serializers.ValidationError({"password": list(e.messages)})
+
+        return attrs

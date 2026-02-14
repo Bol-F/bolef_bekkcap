@@ -31,11 +31,11 @@ urlpatterns = [
     path("dj-rest-auth/registration/", include("dj_rest_auth.registration.urls")),
     # Google OAuth
     path("dj-rest-auth/google/", GoogleLogin.as_view(), name="google_login"),
-    path(
-        "auth/google/callback/",
-        TemplateView.as_view(template_name="google_callback.html"),
-        name="google_callback",
-    ),
+    # path(
+    #     "auth/google/callback/",
+    #     TemplateView.as_view(template_name="google_callback.html"),
+    #     name="google_callback",
+    # ),
     path("auth/google/exchange/", exchange_google_code, name="google_exchange"),
     # Email OTP
     path("auth/email/send-code/", send_email_code, name="send_email_code"),
