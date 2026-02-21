@@ -1,6 +1,8 @@
 from datetime import timedelta
 
-from django.db.models import Avg, Min, Max, Count, OuterRef, Subquery
+from django.db import connection
+from django.db.models import Avg, Min, Max, Count, OuterRef, Subquery, Q, F
+from django.db.models.functions import Extract, Now
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime, parse_date
 from django.shortcuts import get_object_or_404
@@ -59,9 +61,9 @@ class SensorReadingViewSet(
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        qs = SensorReading.objects.select_related("field", "field__farm").filter(
-            field__farm__owner=self.request.user
-        )
+        qs = SensorReading.objects.select_related(
+            "field", "field__farm", "field__soil_profile"
+        ).filter(field__farm__owner=self.request.user)
 
         field_id = self.request.query_params.get("field_id")
         if field_id:
@@ -139,6 +141,8 @@ class RecommendationViewSet(
         qs = Recommendation.objects.select_related("field", "field__farm").filter(
             field__farm__owner=self.request.user
         )
+        if connection.features.has_native_duration_field:
+            qs = qs.annotate(age_hours=Extract(Now() - F("created_at"), "epoch") / 3600.0)
 
         field_id = self.request.query_params.get("field_id")
         if field_id:
@@ -178,7 +182,9 @@ class RecommendationViewSet(
 
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
-    queryset = Notification.objects.select_related("user", "recommendation").all()
+    queryset = Notification.objects.select_related(
+        "user", "recommendation", "recommendation__field"
+    ).all()
     serializer_class = NotificationSerializer
 
     def get_queryset(self):
@@ -237,9 +243,13 @@ class FieldAnalyticsViewSet(viewsets.ViewSet):
 
         stats["moisture_percent_avg"] = stats["moisture_vwc_avg"] * 100 if stats["moisture_vwc_avg"] is not None else None
 
-        active_recs = Recommendation.objects.filter(field=field, is_active=True)
-        stats["active_recommendations"] = active_recs.count()
-        stats["critical_recommendations"] = active_recs.filter(severity=Recommendation.Severity.HIGH).count()
+        rec_stats = Recommendation.objects.filter(field=field, is_active=True).aggregate(
+            active_recommendations=Count("id"),
+            critical_recommendations=Count(
+                "id", filter=Q(severity=Recommendation.Severity.HIGH)
+            ),
+        )
+        stats.update(rec_stats)
 
         stats["field_id"] = field.id
         stats["field_name"] = field.name
@@ -274,25 +284,46 @@ class FieldAnalyticsViewSet(viewsets.ViewSet):
         today_start = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
         readings_today = SensorReading.objects.filter(field__in=owner_fields, ts__gte=today_start).count()
 
-        active_recs = Recommendation.objects.filter(field__in=owner_fields, is_active=True)
-        total_active_recs = active_recs.count()
-        critical_recs = active_recs.filter(severity=Recommendation.Severity.HIGH).count()
+        active_recs = Recommendation.objects.filter(
+            field__in=owner_fields, is_active=True
+        )
+        summary = active_recs.aggregate(
+            total_active_recommendations=Count("id"),
+            critical_recommendations=Count(
+                "id", filter=Q(severity=Recommendation.Severity.HIGH)
+            ),
+            fields_need_attention=Count(
+                "field", filter=Q(severity=Recommendation.Severity.HIGH), distinct=True
+            ),
+        )
+        rec_by_category = {
+            row["category"]: row["count"]
+            for row in active_recs.values("category").annotate(count=Count("id"))
+        }
+        rec_by_severity = {
+            row["severity"]: row["count"]
+            for row in active_recs.values("severity").annotate(count=Count("id"))
+        }
+        for c in Recommendation.Category:
+            rec_by_category.setdefault(c.value, 0)
+        for s in Recommendation.Severity:
+            rec_by_severity.setdefault(s.value, 0)
 
-        rec_by_category = {c.value: active_recs.filter(category=c.value).count() for c in Recommendation.Category}
-        rec_by_severity = {s.value: active_recs.filter(severity=s.value).count() for s in Recommendation.Severity}
-
-        fields_need_attention = active_recs.filter(severity=Recommendation.Severity.HIGH).values("field").distinct().count()
-
-        recent_recommendations = active_recs.select_related("field").order_by("-created_at")[:5]
+        recent_recommendations = active_recs.select_related("field").order_by("-created_at")
+        if connection.features.has_native_duration_field:
+            recent_recommendations = recent_recommendations.annotate(
+                age_hours=Extract(Now() - F("created_at"), "epoch") / 3600.0
+            )
+        recent_recommendations = recent_recommendations[:5]
 
         return Response(
             {
                 "total_fields": total_fields,
                 "fields_with_sensors": fields_with_sensors,
                 "readings_today": readings_today,
-                "active_recommendations": total_active_recs,
-                "critical_recommendations": critical_recs,
-                "fields_need_attention": fields_need_attention,
+                "active_recommendations": summary["total_active_recommendations"],
+                "critical_recommendations": summary["critical_recommendations"],
+                "fields_need_attention": summary["fields_need_attention"],
                 "recommendations_by_category": rec_by_category,
                 "recommendations_by_severity": rec_by_severity,
                 "recent_recommendations": RecommendationSerializer(recent_recommendations, many=True).data,

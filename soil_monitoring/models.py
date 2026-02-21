@@ -125,6 +125,7 @@ class SensorReading(models.Model):
         ordering = ["-ts"]
         indexes = [
             models.Index(fields=["field", "-ts"]),
+            models.Index(fields=["field", "source", "-ts"]),
         ]
         constraints = [
             models.CheckConstraint(
