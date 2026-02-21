@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Optional
 from datetime import timedelta
 
 from django.utils import timezone
-from django.db.models import Avg
+from django.db.models import Avg, Count
 
 from .models import SensorReading, FieldSoilProfile, Recommendation, Notification
 
@@ -13,9 +13,20 @@ logger = logging.getLogger(__name__)
 class SoilAnalysisService:
     """Анализ показаний датчиков и генерация рекомендаций + уведомлений владельцу фермы."""
 
+    HEALTH_WEIGHT_MOISTURE = 0.35
+    HEALTH_WEIGHT_PH = 0.25
+    HEALTH_WEIGHT_EC = 0.25
+    HEALTH_WEIGHT_TEMP = 0.15
+
     @classmethod
     def analyze_reading(cls, reading: SensorReading) -> List[Recommendation]:
         recommendations: List[Recommendation] = []
+        reading = (
+            SensorReading.objects.select_related("field", "field__farm", "field__soil_profile")
+            .filter(pk=reading.pk)
+            .first()
+            or reading
+        )
 
         try:
             profile = reading.field.soil_profile
@@ -337,7 +348,7 @@ class SoilAnalysisService:
     def calculate_field_health(cls, field_id: int, days: int = 7) -> Dict[str, Any]:
         from farm.models import Field
 
-        field = Field.objects.get(id=field_id)
+        field = Field.objects.select_related("soil_profile").get(id=field_id)
 
         try:
             profile = field.soil_profile
@@ -346,13 +357,12 @@ class SoilAnalysisService:
 
         cutoff = timezone.now() - timedelta(days=days)
         readings = SensorReading.objects.filter(field_id=field_id, ts__gte=cutoff)
-
-        if not readings.exists():
+        latest_reading = readings.select_related("field", "field__farm", "field__soil_profile").first()
+        if latest_reading is None:
             return {"error": "No readings available for this period"}
 
-        latest_reading = readings.order_by("-ts").first()
-
         stats = readings.aggregate(
+            readings_count=Count("id"),
             moisture_avg=Avg("moisture_vwc"),
             ph_avg=Avg("ph"),
             ec_avg=Avg("ec_ds_m"),
@@ -365,10 +375,10 @@ class SoilAnalysisService:
         temp_health = cls._evaluate_temp_health(stats["temp_avg"], profile)
 
         overall_score = (
-            moisture_health["score"] * 0.35
-            + ph_health["score"] * 0.25
-            + ec_health["score"] * 0.25
-            + temp_health["score"] * 0.15
+            moisture_health["score"] * cls.HEALTH_WEIGHT_MOISTURE
+            + ph_health["score"] * cls.HEALTH_WEIGHT_PH
+            + ec_health["score"] * cls.HEALTH_WEIGHT_EC
+            + temp_health["score"] * cls.HEALTH_WEIGHT_TEMP
         )
 
         if overall_score >= 80:

@@ -84,8 +84,11 @@ class SensorReadingSerializer(serializers.ModelSerializer):
 
     def get_health_indicators(self, obj):
         indicators = {"moisture_status": None, "ph_status": None, "ec_status": None, "temp_status": None}
+        field = getattr(obj, "field", None)
+        if field is None:
+            return indicators
         try:
-            profile = obj.field.soil_profile
+            profile = field.soil_profile
         except FieldSoilProfile.DoesNotExist:
             return indicators
 
@@ -155,14 +158,18 @@ class SensorReadingCreateSerializer(serializers.ModelSerializer):
         if "field" not in data and "field_id" not in data:
             raise serializers.ValidationError("field or field_id is required")
 
+        user = _get_request_user(self)
         if "field_id" in data and "field" not in data:
+            field_id = data.pop("field_id")
+            field_qs = Field.objects.select_related("farm")
+            if user:
+                field_qs = field_qs.filter(farm__owner=user)
             try:
-                data["field"] = Field.objects.get(id=data.pop("field_id"))
+                data["field"] = field_qs.get(id=field_id)
             except Field.DoesNotExist:
-                raise serializers.ValidationError("Field not found")
+                raise serializers.ValidationError("Field not found or not accessible")
 
         # Owner check
-        user = _get_request_user(self)
         if user and data.get("field") and data["field"].farm.owner_id != user.id:
             raise serializers.ValidationError("You do not own this field.")
 
@@ -196,6 +203,8 @@ class RecommendationSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "field_name", "age_hours"]
 
     def get_age_hours(self, obj):
+        if hasattr(obj, "age_hours"):
+            return round(float(obj.age_hours), 1)
         delta = timezone.now() - obj.created_at
         return round(delta.total_seconds() / 3600, 1)
 
