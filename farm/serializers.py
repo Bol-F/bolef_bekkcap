@@ -143,10 +143,13 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         """
         Rule: if field/crop/animal provided, they must belong to the same farm.
         """
-        farm = attrs.get("farm")
-        field = attrs.get("field")
-        crop = attrs.get("crop")
-        animal = attrs.get("animal")
+        farm = attrs.get("farm") or getattr(self.instance, "farm", None)
+        field = attrs.get("field") or getattr(self.instance, "field", None)
+        crop = attrs.get("crop") or getattr(self.instance, "crop", None)
+        animal = attrs.get("animal") or getattr(self.instance, "animal", None)
+
+        if not farm:
+            raise ValidationError({"farm": "This field is required."})
 
         if field and field.farm_id != farm.id:
             raise ValidationError("Field does not belong to the selected farm.")
