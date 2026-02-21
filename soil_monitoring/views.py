@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.db import models
 from django.db.models import Avg, Min, Max, Count, OuterRef, Subquery
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime, parse_date
@@ -29,11 +30,22 @@ def _parse_dt(value: str):
         return None
     dt = parse_datetime(value)
     if dt:
+        if timezone.is_naive(dt):
+            return timezone.make_aware(dt)
         return dt
     d = parse_date(value)
     if d:
         return timezone.make_aware(timezone.datetime(d.year, d.month, d.day, 0, 0, 0))
     return None
+
+
+def _get_days_param(request, default: int = 7):
+    raw_days = request.query_params.get("days", default)
+    try:
+        days = int(raw_days)
+    except (TypeError, ValueError):
+        return None
+    return days if days > 0 else None
 
 
 class FieldSoilProfileViewSet(viewsets.ModelViewSet):
@@ -59,7 +71,7 @@ class SensorReadingViewSet(
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        qs = SensorReading.objects.select_related("field", "field__farm").filter(
+        qs = SensorReading.objects.select_related("field", "field__farm", "field__soil_profile").filter(
             field__farm__owner=self.request.user
         )
 
@@ -105,7 +117,11 @@ class SensorReadingViewSet(
         )
         serializer.is_valid(raise_exception=True)
         readings = serializer.save()
-        return Response(SensorReadingSerializer(readings, many=True).data, status=status.HTTP_201_CREATED)
+        reading_ids = [reading.id for reading in readings]
+        readings_qs = SensorReading.objects.filter(id__in=reading_ids).select_related(
+            "field", "field__soil_profile"
+        ).order_by("-ts")
+        return Response(SensorReadingSerializer(readings_qs, many=True).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["get"])
     def latest(self, request):
@@ -120,8 +136,8 @@ class SensorReadingViewSet(
         ).values_list("latest_reading_id", flat=True)
 
         latest_readings = SensorReading.objects.filter(
-            id__in=list(latest_ids)
-        ).select_related("field").order_by("-ts")
+            id__in=latest_ids
+        ).select_related("field", "field__soil_profile").order_by("-ts")
 
         return Response(SensorReadingSerializer(latest_readings, many=True).data)
 
@@ -178,7 +194,7 @@ class RecommendationViewSet(
 
 class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
-    queryset = Notification.objects.select_related("user", "recommendation").all()
+    queryset = Notification.objects.select_related("user", "recommendation", "recommendation__field").all()
     serializer_class = NotificationSerializer
 
     def get_queryset(self):
@@ -206,10 +222,12 @@ class FieldAnalyticsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def statistics(self, request):
         field_id = request.query_params.get("field_id")
-        days = int(request.query_params.get("days", 7))
+        days = _get_days_param(request)
 
         if not field_id:
             return Response({"detail": "field_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if days is None:
+            return Response({"detail": "days must be a positive integer"}, status=status.HTTP_400_BAD_REQUEST)
 
         field = get_object_or_404(Field, id=field_id, farm__owner=request.user)
 
@@ -237,9 +255,12 @@ class FieldAnalyticsViewSet(viewsets.ViewSet):
 
         stats["moisture_percent_avg"] = stats["moisture_vwc_avg"] * 100 if stats["moisture_vwc_avg"] is not None else None
 
-        active_recs = Recommendation.objects.filter(field=field, is_active=True)
-        stats["active_recommendations"] = active_recs.count()
-        stats["critical_recommendations"] = active_recs.filter(severity=Recommendation.Severity.HIGH).count()
+        active_rec_stats = Recommendation.objects.filter(field=field, is_active=True).aggregate(
+            active_total=Count("id"),
+            critical_total=Count("id", filter=models.Q(severity=Recommendation.Severity.HIGH)),
+        )
+        stats["active_recommendations"] = active_rec_stats["active_total"]
+        stats["critical_recommendations"] = active_rec_stats["critical_total"]
 
         stats["field_id"] = field.id
         stats["field_name"] = field.name
@@ -250,10 +271,12 @@ class FieldAnalyticsViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def health(self, request):
         field_id = request.query_params.get("field_id")
-        days = int(request.query_params.get("days", 7))
+        days = _get_days_param(request)
 
         if not field_id:
             return Response({"detail": "field_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if days is None:
+            return Response({"detail": "days must be a positive integer"}, status=status.HTTP_400_BAD_REQUEST)
 
         # ownership enforced:
         get_object_or_404(Field, id=int(field_id), farm__owner=request.user)
@@ -278,10 +301,19 @@ class FieldAnalyticsViewSet(viewsets.ViewSet):
         total_active_recs = active_recs.count()
         critical_recs = active_recs.filter(severity=Recommendation.Severity.HIGH).count()
 
-        rec_by_category = {c.value: active_recs.filter(category=c.value).count() for c in Recommendation.Category}
-        rec_by_severity = {s.value: active_recs.filter(severity=s.value).count() for s in Recommendation.Severity}
+        category_counts = dict(
+            active_recs.values_list("category").annotate(total=Count("id"))
+        )
+        rec_by_category = {c.value: category_counts.get(c.value, 0) for c in Recommendation.Category}
 
-        fields_need_attention = active_recs.filter(severity=Recommendation.Severity.HIGH).values("field").distinct().count()
+        severity_counts = dict(
+            active_recs.values_list("severity").annotate(total=Count("id"))
+        )
+        rec_by_severity = {s.value: severity_counts.get(s.value, 0) for s in Recommendation.Severity}
+
+        fields_need_attention = active_recs.filter(
+            severity=Recommendation.Severity.HIGH
+        ).values("field").distinct().count()
 
         recent_recommendations = active_recs.select_related("field").order_by("-created_at")[:5]
 

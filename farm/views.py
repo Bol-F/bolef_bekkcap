@@ -73,7 +73,7 @@ class FarmViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Farm.objects.none()
-        return Farm.objects.filter(owner=self.request.user)
+        return Farm.objects.filter(owner=self.request.user).select_related("owner")
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -90,7 +90,9 @@ class FieldViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Field.objects.none()
-        return Field.objects.filter(farm__owner=self.request.user)
+        return Field.objects.filter(farm__owner=self.request.user).select_related(
+            "farm", "farm__owner"
+        )
 
     def perform_create(self, serializer):
         # Farm queryset already filtered in serializer __init__,
@@ -114,7 +116,9 @@ class CropViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Crop.objects.none()
-        return Crop.objects.filter(field__farm__owner=self.request.user)
+        return Crop.objects.filter(field__farm__owner=self.request.user).select_related(
+            "field", "field__farm", "field__farm__owner"
+        )
 
     def perform_create(self, serializer):
         field = serializer.validated_data.get("field")
@@ -136,7 +140,9 @@ class AnimalViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Animal.objects.none()
-        return Animal.objects.filter(farm__owner=self.request.user)
+        return Animal.objects.filter(farm__owner=self.request.user).select_related(
+            "farm", "farm__owner"
+        )
 
     def perform_create(self, serializer):
         farm = serializer.validated_data.get("farm")
@@ -158,7 +164,14 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return ActivityLog.objects.none()
-        return ActivityLog.objects.filter(farm__owner=self.request.user)
+        return ActivityLog.objects.filter(farm__owner=self.request.user).select_related(
+            "farm",
+            "farm__owner",
+            "field",
+            "crop",
+            "animal",
+            "created_by",
+        )
 
     def perform_create(self, serializer):
         # Your serializer.validate() already checks field/crop/animal belong to same farm.
@@ -181,7 +194,7 @@ class UserProfileViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return UserProfile.objects.none()
-        return UserProfile.objects.filter(user=self.request.user)
+        return UserProfile.objects.filter(user=self.request.user).select_related("user")
 
     def perform_create(self, serializer):
         if UserProfile.objects.filter(user=self.request.user).exists():
