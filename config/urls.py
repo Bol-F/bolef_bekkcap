@@ -24,7 +24,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # API
     path("api/v1/", include("farm.urls")),
-    path('api/v1/soil/', include('soil_monitoring.urls')),
+    path("api/v1/soil/", include("soil_monitoring.urls")),
     # Auth (dj-rest-auth)
     path("dj-rest-auth/", include("dj_rest_auth.urls")),
     path("dj-rest-auth/registration/", include("dj_rest_auth.registration.urls")),

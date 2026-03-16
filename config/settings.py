@@ -73,7 +73,7 @@ INSTALLED_APPS = [
     "dj_rest_auth.registration",
     # Local
     "farm",
-    'soil_monitoring',
+    "soil_monitoring",
 ]
 
 # =============================================================================
@@ -269,11 +269,11 @@ EMAIL_TIMEOUT = env_int("EMAIL_TIMEOUT", 20)  # seconds
 
 EMAIL_HOST_USER = (os.getenv("EMAIL_HOST_USER") or os.getenv("SMTP_USER") or "").strip()
 EMAIL_HOST_PASSWORD = (
-        os.getenv("EMAIL_HOST_PASSWORD") or os.getenv("SMTP_PASSWORD") or ""
+    os.getenv("EMAIL_HOST_PASSWORD") or os.getenv("SMTP_PASSWORD") or ""
 )
 
 DEFAULT_FROM_EMAIL = (
-        os.getenv("DEFAULT_FROM_EMAIL") or EMAIL_HOST_USER or "no-reply@bolef.local"
+    os.getenv("DEFAULT_FROM_EMAIL") or EMAIL_HOST_USER or "no-reply@bolef.local"
 ).strip()
 SERVER_EMAIL = os.getenv("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 

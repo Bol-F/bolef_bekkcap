@@ -21,7 +21,9 @@ class SensorReadingQueryOptimizationTests(TestCase):
         self.client.force_authenticate(self.user)
 
         farm = Farm.objects.create(owner=self.user, name="Farm")
-        self.field = Field.objects.create(farm=farm, name="A", area="10.00", soil_type="loam")
+        self.field = Field.objects.create(
+            farm=farm, name="A", area="10.00", soil_type="loam"
+        )
         FieldSoilProfile.objects.create(field=self.field)
 
         for hour in range(5):
@@ -54,7 +56,9 @@ class RecommendationAgeAnnotationTests(TestCase):
         self.client.force_authenticate(self.user)
 
         farm = Farm.objects.create(owner=self.user, name="Farm")
-        field = Field.objects.create(farm=farm, name="B", area="12.00", soil_type="clay")
+        field = Field.objects.create(
+            farm=farm, name="B", area="12.00", soil_type="clay"
+        )
         self.rec = Recommendation.objects.create(
             field=field,
             category=Recommendation.Category.SOIL_PH,

@@ -88,7 +88,9 @@ class SensorReading(models.Model):
         MANUAL = "manual", "manual"
         TEST = "test", "test"
 
-    field = models.ForeignKey(Field, on_delete=models.CASCADE, related_name="soil_readings")
+    field = models.ForeignKey(
+        Field, on_delete=models.CASCADE, related_name="soil_readings"
+    )
     ts = models.DateTimeField(default=timezone.now, db_index=True)
 
     moisture_vwc = models.FloatField(
@@ -118,7 +120,9 @@ class SensorReading(models.Model):
         help_text="Sensor depth in cm",
     )
 
-    source = models.CharField(max_length=16, choices=Source.choices, default=Source.SENSOR)
+    source = models.CharField(
+        max_length=16, choices=Source.choices, default=Source.SENSOR
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -129,7 +133,8 @@ class SensorReading(models.Model):
         ]
         constraints = [
             models.CheckConstraint(
-                condition=Q(moisture_vwc__isnull=True) | (Q(moisture_vwc__gte=0.0) & Q(moisture_vwc__lte=1.0)),
+                condition=Q(moisture_vwc__isnull=True)
+                | (Q(moisture_vwc__gte=0.0) & Q(moisture_vwc__lte=1.0)),
                 name="reading_moisture_vwc_0_1_or_null",
             ),
             models.CheckConstraint(
@@ -141,7 +146,8 @@ class SensorReading(models.Model):
                 name="reading_ec_nonneg_or_null",
             ),
             models.CheckConstraint(
-                condition=Q(soil_temp_c__isnull=True) | (Q(soil_temp_c__gte=-50.0) & Q(soil_temp_c__lte=80.0)),
+                condition=Q(soil_temp_c__isnull=True)
+                | (Q(soil_temp_c__gte=-50.0) & Q(soil_temp_c__lte=80.0)),
                 name="reading_temp_range_or_null",
             ),
         ]
@@ -162,7 +168,9 @@ class Recommendation(models.Model):
         SOIL_EC = "SOIL_EC", "SOIL_EC"
         SOIL_TEMP = "SOIL_TEMP", "SOIL_TEMP"
 
-    field = models.ForeignKey(Field, on_delete=models.CASCADE, related_name="recommendations")
+    field = models.ForeignKey(
+        Field, on_delete=models.CASCADE, related_name="recommendations"
+    )
     category = models.CharField(max_length=32, choices=Category.choices)
     severity = models.CharField(max_length=8, choices=Severity.choices)
 
@@ -194,11 +202,19 @@ class Notification(models.Model):
         WS = "WS", "WS"
         EMAIL = "EMAIL", "EMAIL"
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications")
-    recommendation = models.ForeignKey(Recommendation, on_delete=models.CASCADE, related_name="notifications")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications"
+    )
+    recommendation = models.ForeignKey(
+        Recommendation, on_delete=models.CASCADE, related_name="notifications"
+    )
 
-    channel = models.CharField(max_length=16, choices=Channel.choices, default=Channel.IN_APP)
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    channel = models.CharField(
+        max_length=16, choices=Channel.choices, default=Channel.IN_APP
+    )
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PENDING
+    )
 
     payload = models.JSONField(default=dict, blank=True)
     error = models.TextField(blank=True, default="")

@@ -19,11 +19,17 @@ class FieldSoilProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = FieldSoilProfile
         fields = [
-            "id", "field", "field_name",
-            "fc_vwc", "pwp_vwc", "mad",
-            "ph_min", "ph_max",
+            "id",
+            "field",
+            "field_name",
+            "fc_vwc",
+            "pwp_vwc",
+            "mad",
+            "ph_min",
+            "ph_max",
             "ec_max_ds_m",
-            "temp_min_c", "temp_max_c",
+            "temp_min_c",
+            "temp_max_c",
             "irrigation_threshold",
             "updated_at",
         ]
@@ -43,7 +49,9 @@ class FieldSoilProfileSerializer(serializers.ModelSerializer):
         fc = data.get("fc_vwc", getattr(self.instance, "fc_vwc", None))
         pwp = data.get("pwp_vwc", getattr(self.instance, "pwp_vwc", None))
         if fc is not None and pwp is not None and fc <= pwp:
-            raise serializers.ValidationError("Field Capacity должен быть больше Permanent Wilting Point")
+            raise serializers.ValidationError(
+                "Field Capacity должен быть больше Permanent Wilting Point"
+            )
 
         ph_min = data.get("ph_min", getattr(self.instance, "ph_min", None))
         ph_max = data.get("ph_max", getattr(self.instance, "ph_max", None))
@@ -67,23 +75,45 @@ class SensorReadingSerializer(serializers.ModelSerializer):
     class Meta:
         model = SensorReading
         fields = [
-            "id", "field", "field_name", "ts",
-            "moisture_vwc", "moisture_percent",
-            "ph", "ec_ds_m", "ec_us_cm",
-            "soil_temp_c", "depth_cm",
-            "source", "health_indicators",
+            "id",
+            "field",
+            "field_name",
+            "ts",
+            "moisture_vwc",
+            "moisture_percent",
+            "ph",
+            "ec_ds_m",
+            "ec_us_cm",
+            "soil_temp_c",
+            "depth_cm",
+            "source",
+            "health_indicators",
             "created_at",
         ]
-        read_only_fields = ["id", "created_at", "field_name", "moisture_percent", "ec_us_cm", "health_indicators"]
+        read_only_fields = [
+            "id",
+            "created_at",
+            "field_name",
+            "moisture_percent",
+            "ec_us_cm",
+            "health_indicators",
+        ]
 
     def get_moisture_percent(self, obj):
-        return round(obj.moisture_vwc * 100, 1) if obj.moisture_vwc is not None else None
+        return (
+            round(obj.moisture_vwc * 100, 1) if obj.moisture_vwc is not None else None
+        )
 
     def get_ec_us_cm(self, obj):
         return round(obj.ec_ds_m * 1000, 0) if obj.ec_ds_m is not None else None
 
     def get_health_indicators(self, obj):
-        indicators = {"moisture_status": None, "ph_status": None, "ec_status": None, "temp_status": None}
+        indicators = {
+            "moisture_status": None,
+            "ph_status": None,
+            "ec_status": None,
+            "temp_status": None,
+        }
         field = getattr(obj, "field", None)
         if field is None:
             return indicators
@@ -93,7 +123,9 @@ class SensorReadingSerializer(serializers.ModelSerializer):
             return indicators
 
         if obj.moisture_vwc is not None:
-            threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (1 - profile.mad)
+            threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (
+                1 - profile.mad
+            )
             if obj.moisture_vwc < profile.pwp_vwc:
                 indicators["moisture_status"] = "critical"
             elif obj.moisture_vwc < threshold:
@@ -112,7 +144,9 @@ class SensorReadingSerializer(serializers.ModelSerializer):
                 indicators["ph_status"] = "optimal"
 
         if obj.ec_ds_m is not None:
-            indicators["ec_status"] = "saline" if obj.ec_ds_m > profile.ec_max_ds_m else "normal"
+            indicators["ec_status"] = (
+                "saline" if obj.ec_ds_m > profile.ec_max_ds_m else "normal"
+            )
 
         if obj.soil_temp_c is not None:
             if obj.soil_temp_c < profile.temp_min_c:
@@ -133,10 +167,17 @@ class SensorReadingCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = SensorReading
         fields = [
-            "field_id", "field", "ts",
-            "moisture_vwc", "moisture_percent",
-            "ph", "ec_ds_m", "ec_us_cm",
-            "soil_temp_c", "depth_cm", "source",
+            "field_id",
+            "field",
+            "ts",
+            "moisture_vwc",
+            "moisture_percent",
+            "ph",
+            "ec_ds_m",
+            "ec_us_cm",
+            "soil_temp_c",
+            "depth_cm",
+            "source",
         ]
 
     def validate(self, data):
@@ -144,7 +185,9 @@ class SensorReadingCreateSerializer(serializers.ModelSerializer):
         if "moisture_percent" in data and "moisture_vwc" not in data:
             pct = data.pop("moisture_percent")
             if pct is not None and (pct < 0 or pct > 100):
-                raise serializers.ValidationError("moisture_percent must be between 0 and 100")
+                raise serializers.ValidationError(
+                    "moisture_percent must be between 0 and 100"
+                )
             data["moisture_vwc"] = None if pct is None else pct / 100.0
 
         # Convert ec_us_cm -> ec_ds_m
@@ -179,11 +222,15 @@ class SensorReadingCreateSerializer(serializers.ModelSerializer):
         reading = SensorReading.objects.create(**validated_data)
 
         from .services import SoilAnalysisService
+
         try:
             SoilAnalysisService.analyze_reading(reading)
         except Exception:
             import logging
-            logging.getLogger(__name__).exception("Analysis failed for reading %s", reading.id)
+
+            logging.getLogger(__name__).exception(
+                "Analysis failed for reading %s", reading.id
+            )
 
         return reading
 
@@ -195,10 +242,17 @@ class RecommendationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Recommendation
         fields = [
-            "id", "field", "field_name",
-            "category", "severity",
-            "title", "message", "evidence",
-            "created_at", "is_active", "age_hours",
+            "id",
+            "field",
+            "field_name",
+            "category",
+            "severity",
+            "title",
+            "message",
+            "evidence",
+            "created_at",
+            "is_active",
+            "age_hours",
         ]
         read_only_fields = ["id", "created_at", "field_name", "age_hours"]
 
@@ -210,21 +264,39 @@ class RecommendationSerializer(serializers.ModelSerializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-    recommendation_title = serializers.CharField(source="recommendation.title", read_only=True)
-    recommendation_message = serializers.CharField(source="recommendation.message", read_only=True)
-    recommendation_severity = serializers.CharField(source="recommendation.severity", read_only=True)
+    recommendation_title = serializers.CharField(
+        source="recommendation.title", read_only=True
+    )
+    recommendation_message = serializers.CharField(
+        source="recommendation.message", read_only=True
+    )
+    recommendation_severity = serializers.CharField(
+        source="recommendation.severity", read_only=True
+    )
 
     class Meta:
         model = Notification
         fields = [
-            "id", "user", "recommendation",
-            "recommendation_title", "recommendation_message", "recommendation_severity",
-            "channel", "status", "payload", "error",
-            "created_at", "sent_at",
+            "id",
+            "user",
+            "recommendation",
+            "recommendation_title",
+            "recommendation_message",
+            "recommendation_severity",
+            "channel",
+            "status",
+            "payload",
+            "error",
+            "created_at",
+            "sent_at",
         ]
         read_only_fields = [
-            "id", "created_at", "sent_at",
-            "recommendation_title", "recommendation_message", "recommendation_severity",
+            "id",
+            "created_at",
+            "sent_at",
+            "recommendation_title",
+            "recommendation_message",
+            "recommendation_severity",
         ]
 
 

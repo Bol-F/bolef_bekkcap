@@ -1,6 +1,7 @@
 """
 URL Configuration for Soil Monitoring API
 """
+
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
@@ -14,16 +15,16 @@ from .views import (
 
 # Create router
 router = DefaultRouter()
-router.register(r'profiles', FieldSoilProfileViewSet, basename='soil-profile')
-router.register(r'readings', SensorReadingViewSet, basename='sensor-reading')
-router.register(r'recommendations', RecommendationViewSet, basename='recommendation')
-router.register(r'notifications', NotificationViewSet, basename='notification')
-router.register(r'analytics', FieldAnalyticsViewSet, basename='analytics')
+router.register(r"profiles", FieldSoilProfileViewSet, basename="soil-profile")
+router.register(r"readings", SensorReadingViewSet, basename="sensor-reading")
+router.register(r"recommendations", RecommendationViewSet, basename="recommendation")
+router.register(r"notifications", NotificationViewSet, basename="notification")
+router.register(r"analytics", FieldAnalyticsViewSet, basename="analytics")
 
-app_name = 'soil_monitoring'
+app_name = "soil_monitoring"
 
 urlpatterns = [
-    path('', include(router.urls)),
+    path("", include(router.urls)),
 ]
 
 """

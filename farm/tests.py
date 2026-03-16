@@ -81,5 +81,9 @@ class ActivityLogViewSetQueryTests(TestCase):
             response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
-        payload = response.data.get("results", response.data) if hasattr(response.data, "get") else response.data
+        payload = (
+            response.data.get("results", response.data)
+            if hasattr(response.data, "get")
+            else response.data
+        )
         self.assertEqual(len(payload), 3)

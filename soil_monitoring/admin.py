@@ -2,6 +2,7 @@
 Django Admin Configuration for Soil Monitoring
 Copy-paste safe (fixes SafeString formatting issue)
 """
+
 from django.contrib import admin
 from django.utils import timezone
 from django.utils.html import format_html
@@ -94,7 +95,10 @@ class SensorReadingAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ("Основная информация", {"fields": ("field", "ts", "source", "depth_cm")}),
-        ("Показания датчиков", {"fields": ("moisture_vwc", "ph", "ec_ds_m", "soil_temp_c")}),
+        (
+            "Показания датчиков",
+            {"fields": ("moisture_vwc", "ph", "ec_ds_m", "soil_temp_c")},
+        ),
         ("Метаданные", {"fields": ("created_at",), "classes": ("collapse",)}),
     )
 
@@ -114,7 +118,9 @@ class SensorReadingAdmin(admin.ModelAdmin):
 
         try:
             profile = obj.field.soil_profile
-            threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (1 - profile.mad)
+            threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (
+                1 - profile.mad
+            )
 
             if obj.moisture_vwc < profile.pwp_vwc:
                 color = "red"
@@ -155,7 +161,9 @@ class SensorReadingAdmin(admin.ModelAdmin):
 
             # Moisture
             if obj.moisture_vwc is not None:
-                threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (1 - profile.mad)
+                threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (
+                    1 - profile.mad
+                )
                 if obj.moisture_vwc < profile.pwp_vwc:
                     issues.append("💧 Critical")
                 elif obj.moisture_vwc < threshold:
@@ -172,11 +180,16 @@ class SensorReadingAdmin(admin.ModelAdmin):
 
             # Temp
             if obj.soil_temp_c is not None:
-                if obj.soil_temp_c < profile.temp_min_c or obj.soil_temp_c > profile.temp_max_c:
+                if (
+                    obj.soil_temp_c < profile.temp_min_c
+                    or obj.soil_temp_c > profile.temp_max_c
+                ):
                     issues.append("🌡️ Temp")
 
             if issues:
-                return format_html('<span style="color: red;">{}</span>', ", ".join(issues))
+                return format_html(
+                    '<span style="color: red;">{}</span>', ", ".join(issues)
+                )
             return format_html('<span style="color: green;">✓ OK</span>')
         except Exception:
             return "-"
@@ -205,7 +218,10 @@ class RecommendationAdmin(admin.ModelAdmin):
     list_select_related = ("field", "field__farm")
 
     fieldsets = (
-        ("Основная информация", {"fields": ("field", "category", "severity", "is_active")}),
+        (
+            "Основная информация",
+            {"fields": ("field", "category", "severity", "is_active")},
+        ),
         ("Содержание", {"fields": ("title", "message")}),
         ("Доказательства", {"fields": ("evidence_display",), "classes": ("collapse",)}),
         ("Метаданные", {"fields": ("created_at",), "classes": ("collapse",)}),
@@ -258,7 +274,10 @@ class RecommendationAdmin(admin.ModelAdmin):
     @admin.display(description="Доказательства (JSON)")
     def evidence_display(self, obj):
         import json
-        return format_html("<pre>{}</pre>", json.dumps(obj.evidence, indent=2, ensure_ascii=False))
+
+        return format_html(
+            "<pre>{}</pre>", json.dumps(obj.evidence, indent=2, ensure_ascii=False)
+        )
 
     @admin.action(description="Деактивировать выбранные")
     def deactivate_recommendations(self, request, queryset):
@@ -287,9 +306,15 @@ class NotificationAdmin(admin.ModelAdmin):
     list_select_related = ("user", "recommendation", "recommendation__field")
 
     fieldsets = (
-        ("Основная информация", {"fields": ("user", "recommendation", "channel", "status")}),
+        (
+            "Основная информация",
+            {"fields": ("user", "recommendation", "channel", "status")},
+        ),
         ("Данные", {"fields": ("payload_display", "error"), "classes": ("collapse",)}),
-        ("Временные метки", {"fields": ("created_at", "sent_at"), "classes": ("collapse",)}),
+        (
+            "Временные метки",
+            {"fields": ("created_at", "sent_at"), "classes": ("collapse",)},
+        ),
     )
 
     @admin.display(description="Рекомендация")
@@ -300,9 +325,16 @@ class NotificationAdmin(admin.ModelAdmin):
     @admin.display(description="Статус")
     def status_badge(self, obj):
         colors = {"PENDING": "orange", "SENT": "green", "FAILED": "red"}
-        return format_html('<span style="color: {};">{}</span>', colors.get(obj.status, "gray"), obj.get_status_display())
+        return format_html(
+            '<span style="color: {};">{}</span>',
+            colors.get(obj.status, "gray"),
+            obj.get_status_display(),
+        )
 
     @admin.display(description="Payload (JSON)")
     def payload_display(self, obj):
         import json
-        return format_html("<pre>{}</pre>", json.dumps(obj.payload, indent=2, ensure_ascii=False))
+
+        return format_html(
+            "<pre>{}</pre>", json.dumps(obj.payload, indent=2, ensure_ascii=False)
+        )
