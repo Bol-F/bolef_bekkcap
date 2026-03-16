@@ -1,9 +1,10 @@
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import timedelta
 
 from django.utils import timezone
-from django.db.models import Avg, Count
+from django.utils.dateparse import parse_datetime
+from django.db.models import Avg
 
 from .models import SensorReading, FieldSoilProfile, Recommendation, Notification
 
@@ -11,22 +12,19 @@ logger = logging.getLogger(__name__)
 
 
 class SoilAnalysisService:
-    """Анализ показаний датчиков и генерация рекомендаций + уведомлений владельцу фермы."""
+    """
+    Анализ показаний датчиков и генерация рекомендаций + IN_APP уведомлений владельцу фермы.
+    Теперь учитывает прогноз дождя (Open-Meteo через weather.services).
+    """
 
-    HEALTH_WEIGHT_MOISTURE = 0.35
-    HEALTH_WEIGHT_PH = 0.25
-    HEALTH_WEIGHT_EC = 0.25
-    HEALTH_WEIGHT_TEMP = 0.15
+    # Порог “дождь скоро” (можешь менять)
+    RAIN_MM_NEXT_HOURS = 3.0       # мм осадков за окно
+    RAIN_PROB_MAX = 70.0           # макс вероятность осадков (%)
+    RAIN_WINDOW_HOURS = 12         # окно прогнозирования
 
     @classmethod
     def analyze_reading(cls, reading: SensorReading) -> List[Recommendation]:
         recommendations: List[Recommendation] = []
-        reading = (
-            SensorReading.objects.select_related("field", "field__farm", "field__soil_profile")
-            .filter(pk=reading.pk)
-            .first()
-            or reading
-        )
 
         try:
             profile = reading.field.soil_profile
@@ -49,13 +47,99 @@ class SoilAnalysisService:
         return recommendations
 
     # -------------------------
+    # WEATHER helpers
+    # -------------------------
+    @classmethod
+    def _get_weather_context(cls, field) -> Optional[Dict[str, Any]]:
+        """
+        Returns weather context for next RAIN_WINDOW_HOURS hours:
+        {
+          "will_rain_soon": bool,
+          "rain_mm": float,
+          "max_prob": float,
+          "window_hours": int,
+          "source": "open-meteo"
+        }
+        or None if no coords / provider error.
+        """
+        if getattr(field, "latitude", None) is None or getattr(field, "longitude", None) is None:
+            return None
+
+        try:
+            # import inside to avoid hard dependency at import time
+            from weather.services import fetch_open_meteo_forecast
+        except Exception:
+            logger.warning("weather app not available or import failed")
+            return None
+
+        lat = float(field.latitude)
+        lon = float(field.longitude)
+
+        try:
+            data, _from_cache = fetch_open_meteo_forecast(lat=lat, lon=lon, days=2, timezone="auto")
+        except Exception as e:
+            logger.warning("Weather fetch failed: %s", e)
+            return None
+
+        hourly = (data or {}).get("hourly") or {}
+        times = hourly.get("time") or []
+        precipitation = hourly.get("precipitation") or []
+        prob = hourly.get("precipitation_probability") or []
+
+        if not times or not precipitation:
+            return None
+
+        now = timezone.now()
+        end = now + timedelta(hours=cls.RAIN_WINDOW_HOURS)
+
+        rain_sum = 0.0
+        max_prob = 0.0
+
+        # safe iteration by index length
+        n = min(len(times), len(precipitation), len(prob) if prob else len(times))
+        for i in range(n):
+            dt = parse_datetime(times[i])
+            if not dt:
+                continue
+            # dt может быть naive или aware — приводим к aware, если надо
+            if timezone.is_naive(dt):
+                dt = timezone.make_aware(dt)
+
+            if dt < now or dt > end:
+                continue
+
+            try:
+                rain_sum += float(precipitation[i] or 0.0)
+            except Exception:
+                pass
+
+            if prob:
+                try:
+                    max_prob = max(max_prob, float(prob[i] or 0.0))
+                except Exception:
+                    pass
+
+        will_rain_soon = (rain_sum >= cls.RAIN_MM_NEXT_HOURS) or (max_prob >= cls.RAIN_PROB_MAX)
+
+        return {
+            "will_rain_soon": bool(will_rain_soon),
+            "rain_mm": round(rain_sum, 2),
+            "max_prob": round(max_prob, 1),
+            "window_hours": cls.RAIN_WINDOW_HOURS,
+            "source": "open-meteo",
+        }
+
+    # -------------------------
     # analyzers
     # -------------------------
     @classmethod
     def _analyze_moisture(cls, reading: SensorReading, profile: FieldSoilProfile) -> List[Recommendation]:
         recommendations: List[Recommendation] = []
-        irrigation_threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (1 - profile.mad)
 
+        irrigation_threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (1 - profile.mad)
+        weather_ctx = cls._get_weather_context(reading.field)
+
+        # 1) CRITICAL dry: ignore weather
         if reading.moisture_vwc < profile.pwp_vwc:
             recommendations.append(
                 cls._create_recommendation(
@@ -64,9 +148,8 @@ class SoilAnalysisService:
                     severity=Recommendation.Severity.HIGH,
                     title="🚨 КРИТИЧЕСКАЯ СУХОСТЬ ПОЧВЫ",
                     message=(
-                        f"Влажность почвы ({reading.moisture_vwc * 100:.1f}%) ниже точки "
-                        f"постоянного увядания ({profile.pwp_vwc * 100:.1f}%). "
-                        f"ТРЕБУЕТСЯ СРОЧНЫЙ ПОЛИВ!"
+                        f"Влажность ({reading.moisture_vwc * 100:.1f}%) ниже точки увядания "
+                        f"({profile.pwp_vwc * 100:.1f}%). ТРЕБУЕТСЯ СРОЧНЫЙ ПОЛИВ!"
                     ),
                     evidence={
                         "moisture_vwc": reading.moisture_vwc,
@@ -75,48 +158,95 @@ class SoilAnalysisService:
                         "threshold": irrigation_threshold,
                         "reading_id": reading.id,
                         "depth_cm": reading.depth_cm,
+                        "weather": weather_ctx,
                     },
                 )
             )
-        elif reading.moisture_vwc < irrigation_threshold:
+            return recommendations
+
+        # 2) Need watering (below MAD threshold) — but check rain soon
+        if reading.moisture_vwc < irrigation_threshold:
             depletion_pct = ((profile.fc_vwc - reading.moisture_vwc) / (profile.fc_vwc - profile.pwp_vwc)) * 100
-            recommendations.append(
-                cls._create_recommendation(
-                    field=reading.field,
-                    category=Recommendation.Category.IRRIGATION,
-                    severity=Recommendation.Severity.MED,
-                    title="💧 Требуется полив",
-                    message=(
-                        f"Влажность почвы ({reading.moisture_vwc * 100:.1f}%) ниже порога MAD "
-                        f"({irrigation_threshold * 100:.1f}%). "
-                        f"Истощение: {depletion_pct:.0f}%. Рекомендуется полив."
-                    ),
-                    evidence={
-                        "moisture_vwc": reading.moisture_vwc,
-                        "threshold": irrigation_threshold,
-                        "depletion_pct": depletion_pct,
-                        "mad": profile.mad,
-                        "reading_id": reading.id,
-                    },
+
+            if weather_ctx and weather_ctx.get("will_rain_soon"):
+                # downgrade / suggest delay
+                recommendations.append(
+                    cls._create_recommendation(
+                        field=reading.field,
+                        category=Recommendation.Category.IRRIGATION,
+                        severity=Recommendation.Severity.LOW,
+                        title="🌧️ Полив можно отложить (ожидается дождь)",
+                        message=(
+                            f"Влажность ({reading.moisture_vwc * 100:.1f}%) ниже порога "
+                            f"({irrigation_threshold * 100:.1f}%), истощение: {depletion_pct:.0f}%. "
+                            f"Но в ближайшие {weather_ctx['window_hours']}ч прогнозируется дождь "
+                            f"(≈{weather_ctx['rain_mm']} мм, max prob {weather_ctx['max_prob']}%). "
+                            f"Рекомендуется подождать и переснять показания позже."
+                        ),
+                        evidence={
+                            "moisture_vwc": reading.moisture_vwc,
+                            "threshold": irrigation_threshold,
+                            "depletion_pct": depletion_pct,
+                            "mad": profile.mad,
+                            "reading_id": reading.id,
+                            "weather": weather_ctx,
+                        },
+                    )
                 )
-            )
-        elif reading.moisture_vwc > profile.fc_vwc * 1.15:
+            else:
+                # normal watering recommendation
+                recommendations.append(
+                    cls._create_recommendation(
+                        field=reading.field,
+                        category=Recommendation.Category.IRRIGATION,
+                        severity=Recommendation.Severity.MED,
+                        title="💧 Требуется полив",
+                        message=(
+                            f"Влажность ({reading.moisture_vwc * 100:.1f}%) ниже порога MAD "
+                            f"({irrigation_threshold * 100:.1f}%). Истощение: {depletion_pct:.0f}%. "
+                            f"Рекомендуется полив."
+                        ),
+                        evidence={
+                            "moisture_vwc": reading.moisture_vwc,
+                            "threshold": irrigation_threshold,
+                            "depletion_pct": depletion_pct,
+                            "mad": profile.mad,
+                            "reading_id": reading.id,
+                            "weather": weather_ctx,
+                        },
+                    )
+                )
+
+            return recommendations
+
+        # 3) Overmoist: if rain soon -> stronger warning
+        if reading.moisture_vwc > profile.fc_vwc * 1.15:
+            severity = Recommendation.Severity.MED
+            extra = ""
+            if weather_ctx and weather_ctx.get("will_rain_soon"):
+                severity = Recommendation.Severity.HIGH
+                extra = (
+                    f" Дополнительно: ожидается дождь в ближайшие {weather_ctx['window_hours']}ч "
+                    f"(≈{weather_ctx['rain_mm']} мм)."
+                )
+
             recommendations.append(
                 cls._create_recommendation(
                     field=reading.field,
                     category=Recommendation.Category.IRRIGATION,
-                    severity=Recommendation.Severity.MED,
+                    severity=severity,
                     title="⚠️ Переувлажнение почвы",
                     message=(
-                        f"Влажность почвы ({reading.moisture_vwc * 100:.1f}%) значительно "
-                        f"превышает полевую влагоемкость ({profile.fc_vwc * 100:.1f}%). "
-                        f"Проверьте дренаж. Прекратите полив."
+                        f"Влажность ({reading.moisture_vwc * 100:.1f}%) значительно выше "
+                        f"полевой влагоемкости ({profile.fc_vwc * 100:.1f}%). "
+                        f"Проверьте дренаж. Прекратите полив.{extra}"
                     ),
                     evidence={
                         "moisture_vwc": reading.moisture_vwc,
                         "fc_vwc": profile.fc_vwc,
                         "excess_pct": (reading.moisture_vwc - profile.fc_vwc) * 100,
                         "reading_id": reading.id,
+                        "weather": weather_ctx,
                     },
                 )
             )
@@ -130,6 +260,7 @@ class SoilAnalysisService:
         if reading.ph < profile.ph_min:
             deviation = profile.ph_min - reading.ph
             severity = Recommendation.Severity.HIGH if deviation > 1.0 else Recommendation.Severity.MED
+
             recommendations.append(
                 cls._create_recommendation(
                     field=reading.field,
@@ -137,9 +268,8 @@ class SoilAnalysisService:
                     severity=severity,
                     title="🔬 Почва слишком кислая",
                     message=(
-                        f"pH почвы ({reading.ph:.2f}) ниже минимального порога ({profile.ph_min:.2f}). "
-                        f"Отклонение: {deviation:.2f}. "
-                        f"Рекомендации: Внесите известь (CaCO₃) или доломит для повышения pH."
+                        f"pH ({reading.ph:.2f}) ниже минимума ({profile.ph_min:.2f}). "
+                        f"Отклонение: {deviation:.2f}. Рекомендации: известкование/доломит."
                     ),
                     evidence={
                         "ph": reading.ph,
@@ -147,7 +277,7 @@ class SoilAnalysisService:
                         "ph_max": profile.ph_max,
                         "deviation": deviation,
                         "reading_id": reading.id,
-                        "recommendations": ["Известкование (CaCO₃)", "Доломитовая мука (CaMg(CO₃)₂)", "Древесная зола"],
+                        "recommendations": ["CaCO₃", "CaMg(CO₃)₂", "Древесная зола"],
                     },
                 )
             )
@@ -155,6 +285,7 @@ class SoilAnalysisService:
         elif reading.ph > profile.ph_max:
             deviation = reading.ph - profile.ph_max
             severity = Recommendation.Severity.HIGH if deviation > 1.0 else Recommendation.Severity.MED
+
             recommendations.append(
                 cls._create_recommendation(
                     field=reading.field,
@@ -162,9 +293,8 @@ class SoilAnalysisService:
                     severity=severity,
                     title="🔬 Почва слишком щелочная",
                     message=(
-                        f"pH почвы ({reading.ph:.2f}) выше максимального порога ({profile.ph_max:.2f}). "
-                        f"Отклонение: {deviation:.2f}. "
-                        f"Рекомендации: Внесите серу или органические кислоты."
+                        f"pH ({reading.ph:.2f}) выше максимума ({profile.ph_max:.2f}). "
+                        f"Отклонение: {deviation:.2f}. Рекомендации: сера/кислые органические."
                     ),
                     evidence={
                         "ph": reading.ph,
@@ -172,7 +302,7 @@ class SoilAnalysisService:
                         "ph_max": profile.ph_max,
                         "deviation": deviation,
                         "reading_id": reading.id,
-                        "recommendations": ["Элементарная сера", "Сульфат алюминия", "Торф", "Органические мульчи"],
+                        "recommendations": ["Элементарная сера", "Торф", "Органические мульчи"],
                     },
                 )
             )
@@ -203,8 +333,7 @@ class SoilAnalysisService:
                     severity=severity,
                     title="⚡ Повышенная засоленность почвы",
                     message=(
-                        f"EC почвы ({reading.ec_ds_m:.2f} dS/m) превышает порог "
-                        f"({profile.ec_max_ds_m:.2f} dS/m) на {excess_pct:.0f}%. "
+                        f"EC ({reading.ec_ds_m:.2f} dS/m) выше порога ({profile.ec_max_ds_m:.2f}) на {excess_pct:.0f}%. "
                         f"Почва {level}. Рекомендации: промывка, дренаж."
                     ),
                     evidence={
@@ -213,12 +342,7 @@ class SoilAnalysisService:
                         "excess_pct": excess_pct,
                         "salinity_level": level,
                         "reading_id": reading.id,
-                        "recommendations": [
-                            "Промывка почвы большим объемом воды",
-                            "Улучшение дренажа",
-                            "Солеустойчивые культуры",
-                            "Гипс (CaSO₄) для вытеснения натрия",
-                        ],
+                        "recommendations": ["Промывка", "Дренаж", "Солеустойчивые культуры", "Гипс (CaSO₄)"],
                     },
                 )
             )
@@ -232,6 +356,7 @@ class SoilAnalysisService:
         if reading.soil_temp_c < profile.temp_min_c:
             deviation = profile.temp_min_c - reading.soil_temp_c
             severity = Recommendation.Severity.HIGH if deviation > 5 else Recommendation.Severity.LOW
+
             recommendations.append(
                 cls._create_recommendation(
                     field=reading.field,
@@ -239,15 +364,14 @@ class SoilAnalysisService:
                     severity=severity,
                     title="❄️ Низкая температура почвы",
                     message=(
-                        f"Температура почвы ({reading.soil_temp_c:.1f}°C) ниже минимума "
-                        f"({profile.temp_min_c:.1f}°C). Рост корней замедлен."
+                        f"Температура ({reading.soil_temp_c:.1f}°C) ниже минимума ({profile.temp_min_c:.1f}°C). "
+                        f"Рекомендуется мульчирование/укрытие."
                     ),
                     evidence={
                         "soil_temp_c": reading.soil_temp_c,
                         "temp_min_c": profile.temp_min_c,
                         "deviation": deviation,
                         "reading_id": reading.id,
-                        "recommendations": ["Мульчирование", "Пленочные укрытия", "Отложить посадку"],
                     },
                 )
             )
@@ -255,6 +379,7 @@ class SoilAnalysisService:
         elif reading.soil_temp_c > profile.temp_max_c:
             deviation = reading.soil_temp_c - profile.temp_max_c
             severity = Recommendation.Severity.HIGH if deviation > 5 else Recommendation.Severity.MED
+
             recommendations.append(
                 cls._create_recommendation(
                     field=reading.field,
@@ -262,15 +387,14 @@ class SoilAnalysisService:
                     severity=severity,
                     title="🌡️ Высокая температура почвы",
                     message=(
-                        f"Температура почвы ({reading.soil_temp_c:.1f}°C) выше максимума "
-                        f"({profile.temp_max_c:.1f}°C). Стресс для корней."
+                        f"Температура ({reading.soil_temp_c:.1f}°C) выше максимума ({profile.temp_max_c:.1f}°C). "
+                        f"Стресс для корней. Мульча/притенение."
                     ),
                     evidence={
                         "soil_temp_c": reading.soil_temp_c,
                         "temp_max_c": profile.temp_max_c,
                         "deviation": deviation,
                         "reading_id": reading.id,
-                        "recommendations": ["Мульча", "Чаще полив", "Притенение"],
                     },
                 )
             )
@@ -316,16 +440,12 @@ class SoilAnalysisService:
 
     @classmethod
     def _notify_farm_owner(cls, recommendation: Recommendation) -> None:
-        """
-        Field owner == Farm owner => notify recommendation.field.farm.owner
-        """
         try:
             owner = recommendation.field.farm.owner
         except Exception:
             logger.warning("Cannot resolve owner for recommendation %s", recommendation.id)
             return
 
-        # IN_APP = notification exists in DB, so we mark it as SENT
         Notification.objects.create(
             user=owner,
             recommendation=recommendation,
@@ -337,18 +457,19 @@ class SoilAnalysisService:
                 "category": recommendation.category,
                 "severity": recommendation.severity,
                 "title": recommendation.title,
+                "weather": recommendation.evidence.get("weather"),
             },
             sent_at=timezone.now(),
         )
 
     # -------------------------
-    # health calculation
+    # health calculation (без погоды)
     # -------------------------
     @classmethod
     def calculate_field_health(cls, field_id: int, days: int = 7) -> Dict[str, Any]:
         from farm.models import Field
 
-        field = Field.objects.select_related("soil_profile").get(id=field_id)
+        field = Field.objects.get(id=field_id)
 
         try:
             profile = field.soil_profile
@@ -357,12 +478,13 @@ class SoilAnalysisService:
 
         cutoff = timezone.now() - timedelta(days=days)
         readings = SensorReading.objects.filter(field_id=field_id, ts__gte=cutoff)
-        latest_reading = readings.select_related("field", "field__farm", "field__soil_profile").first()
-        if latest_reading is None:
+
+        if not readings.exists():
             return {"error": "No readings available for this period"}
 
+        latest_reading = readings.order_by("-ts").first()
+
         stats = readings.aggregate(
-            readings_count=Count("id"),
             moisture_avg=Avg("moisture_vwc"),
             ph_avg=Avg("ph"),
             ec_avg=Avg("ec_ds_m"),
@@ -375,10 +497,10 @@ class SoilAnalysisService:
         temp_health = cls._evaluate_temp_health(stats["temp_avg"], profile)
 
         overall_score = (
-            moisture_health["score"] * cls.HEALTH_WEIGHT_MOISTURE
-            + ph_health["score"] * cls.HEALTH_WEIGHT_PH
-            + ec_health["score"] * cls.HEALTH_WEIGHT_EC
-            + temp_health["score"] * cls.HEALTH_WEIGHT_TEMP
+            moisture_health["score"] * 0.35
+            + ph_health["score"] * 0.25
+            + ec_health["score"] * 0.25
+            + temp_health["score"] * 0.15
         )
 
         if overall_score >= 80:

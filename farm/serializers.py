@@ -4,6 +4,7 @@ from rest_framework.exceptions import ValidationError
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+
 from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
 
 User = get_user_model()
@@ -29,7 +30,17 @@ class FieldSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Field
-        fields = ["id", "farm", "name", "area", "soil_type"]
+        fields = [
+            "id",
+            "farm",
+            "name",
+            "area",
+            "soil_type",
+            # ✅ location (Variant B)
+            "latitude",
+            "longitude",
+            "location_text",
+        ]
         read_only_fields = ["id"]
 
     def __init__(self, *args, **kwargs):
@@ -37,6 +48,30 @@ class FieldSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if request and request.user.is_authenticated:
             self.fields["farm"].queryset = Farm.objects.filter(owner=request.user)
+
+    def validate(self, attrs):
+        """
+        - If latitude provided, longitude must also be provided (and vice versa)
+        - Values are also constrained by model validators, but we give clean API errors here
+        """
+        instance = getattr(self, "instance", None)
+
+        lat = attrs.get("latitude", getattr(instance, "latitude", None))
+        lon = attrs.get("longitude", getattr(instance, "longitude", None))
+
+        # If one is set and the other is missing -> error
+        if (lat is None) ^ (lon is None):
+            raise ValidationError("Both latitude and longitude must be provided together.")
+
+        # Optional: explicit range validation (model already has validators)
+        if lat is not None:
+            if lat < -90 or lat > 90:
+                raise ValidationError({"latitude": "Latitude must be between -90 and 90."})
+        if lon is not None:
+            if lon < -180 or lon > 180:
+                raise ValidationError({"longitude": "Longitude must be between -180 and 180."})
+
+        return attrs
 
 
 # ==========================
@@ -63,9 +98,7 @@ class CropSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         request = self.context.get("request")
         if request and request.user.is_authenticated:
-            self.fields["field"].queryset = Field.objects.filter(
-                farm__owner=request.user
-            )
+            self.fields["field"].queryset = Field.objects.filter(farm__owner=request.user)
 
 
 # ==========================
@@ -73,9 +106,7 @@ class CropSerializer(serializers.ModelSerializer):
 # ==========================
 class AnimalSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
-    health_status_display = serializers.CharField(
-        source="get_health_status_display", read_only=True
-    )
+    health_status_display = serializers.CharField(source="get_health_status_display", read_only=True)
 
     class Meta:
         model = Animal
@@ -102,15 +133,9 @@ class AnimalSerializer(serializers.ModelSerializer):
 # ==========================
 class ActivityLogSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
-    field = serializers.PrimaryKeyRelatedField(
-        queryset=Field.objects.all(), required=False, allow_null=True
-    )
-    crop = serializers.PrimaryKeyRelatedField(
-        queryset=Crop.objects.all(), required=False, allow_null=True
-    )
-    animal = serializers.PrimaryKeyRelatedField(
-        queryset=Animal.objects.all(), required=False, allow_null=True
-    )
+    field = serializers.PrimaryKeyRelatedField(queryset=Field.objects.all(), required=False, allow_null=True)
+    crop = serializers.PrimaryKeyRelatedField(queryset=Crop.objects.all(), required=False, allow_null=True)
+    animal = serializers.PrimaryKeyRelatedField(queryset=Animal.objects.all(), required=False, allow_null=True)
     created_by = serializers.ReadOnlyField(source="created_by.username")
 
     class Meta:
@@ -245,7 +270,6 @@ class SetPasswordSerializer(serializers.Serializer):
         try:
             validate_password(password, user)
         except DjangoValidationError as e:
-            # Convert Django password validator errors -> DRF field errors
             raise serializers.ValidationError({"password": list(e.messages)})
 
         return attrs

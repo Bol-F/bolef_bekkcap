@@ -1,14 +1,13 @@
-# farm/views.py
+# farm/views.py (overwrite)
 
 import secrets
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import transaction
-from rest_framework import permissions, status
-from rest_framework import viewsets
+
+from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -16,8 +15,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .email_otp_views import create_and_send_otp
-from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
+from allauth.account.models import EmailAddress
+
+from .email_otp_views import create_and_send_otp, _hash  # _hash used to compare codes
+from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile, EmailOTP
 from .serializers import (
     ActivityLogSerializer,
     AnimalSerializer,
@@ -34,35 +35,23 @@ User = get_user_model()
 
 
 class IsOwnerRelatedPermission(permissions.BasePermission):
-    """
-    Object-level access:
-    - Farm: owner only
-    - Field: owner of field.farm
-    - Crop: owner of crop.field.farm
-    - Animal: owner of animal.farm
-    - ActivityLog: owner of log.farm
-    - UserProfile: profile owner only
-    """
-
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated)
 
     def has_object_permission(self, request, view, obj):
         user = request.user
-
         if isinstance(obj, Farm):
-            return obj.owner == user
+            return obj.owner_id == user.id
         if isinstance(obj, Field):
-            return obj.farm.owner == user
+            return obj.farm.owner_id == user.id
         if isinstance(obj, Crop):
-            return obj.field.farm.owner == user
+            return obj.field.farm.owner_id == user.id
         if isinstance(obj, Animal):
-            return obj.farm.owner == user
+            return obj.farm.owner_id == user.id
         if isinstance(obj, ActivityLog):
-            return obj.farm.owner == user
+            return obj.farm.owner_id == user.id
         if isinstance(obj, UserProfile):
-            return obj.user == user
-
+            return obj.user_id == user.id
         return False
 
 
@@ -79,7 +68,6 @@ class FarmViewSet(viewsets.ModelViewSet):
         serializer.save(owner=self.request.user)
 
     def perform_update(self, serializer):
-        # owner must stay same
         serializer.save(owner=self.request.user)
 
 
@@ -90,21 +78,17 @@ class FieldViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Field.objects.none()
-        return Field.objects.filter(farm__owner=self.request.user).select_related(
-            "farm", "farm__owner"
-        )
+        return Field.objects.filter(farm__owner=self.request.user).select_related("farm", "farm__owner")
 
     def perform_create(self, serializer):
-        # Farm queryset already filtered in serializer __init__,
-        # but keep hard check for safety.
         farm = serializer.validated_data.get("farm")
-        if not farm or farm.owner != self.request.user:
+        if not farm or farm.owner_id != self.request.user.id:
             raise ValidationError({"farm": "You do not own this farm."})
         serializer.save()
 
     def perform_update(self, serializer):
         farm = serializer.validated_data.get("farm", serializer.instance.farm)
-        if not farm or farm.owner != self.request.user:
+        if not farm or farm.owner_id != self.request.user.id:
             raise ValidationError({"farm": "You do not own this farm."})
         serializer.save()
 
@@ -122,13 +106,13 @@ class CropViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         field = serializer.validated_data.get("field")
-        if not field or field.farm.owner != self.request.user:
+        if not field or field.farm.owner_id != self.request.user.id:
             raise ValidationError({"field": "You do not own this field/farm."})
         serializer.save()
 
     def perform_update(self, serializer):
         field = serializer.validated_data.get("field", serializer.instance.field)
-        if not field or field.farm.owner != self.request.user:
+        if not field or field.farm.owner_id != self.request.user.id:
             raise ValidationError({"field": "You do not own this field/farm."})
         serializer.save()
 
@@ -140,19 +124,17 @@ class AnimalViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Animal.objects.none()
-        return Animal.objects.filter(farm__owner=self.request.user).select_related(
-            "farm", "farm__owner"
-        )
+        return Animal.objects.filter(farm__owner=self.request.user).select_related("farm", "farm__owner")
 
     def perform_create(self, serializer):
         farm = serializer.validated_data.get("farm")
-        if not farm or farm.owner != self.request.user:
+        if not farm or farm.owner_id != self.request.user.id:
             raise ValidationError({"farm": "You do not own this farm."})
         serializer.save()
 
     def perform_update(self, serializer):
         farm = serializer.validated_data.get("farm", serializer.instance.farm)
-        if not farm or farm.owner != self.request.user:
+        if not farm or farm.owner_id != self.request.user.id:
             raise ValidationError({"farm": "You do not own this farm."})
         serializer.save()
 
@@ -165,24 +147,18 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return ActivityLog.objects.none()
         return ActivityLog.objects.filter(farm__owner=self.request.user).select_related(
-            "farm",
-            "farm__owner",
-            "field",
-            "crop",
-            "animal",
-            "created_by",
+            "farm", "farm__owner", "field", "crop", "animal", "created_by"
         )
 
     def perform_create(self, serializer):
-        # Your serializer.validate() already checks field/crop/animal belong to same farm.
         farm = serializer.validated_data.get("farm")
-        if not farm or farm.owner != self.request.user:
+        if not farm or farm.owner_id != self.request.user.id:
             raise ValidationError({"farm": "You do not own this farm."})
         serializer.save(created_by=self.request.user)
 
     def perform_update(self, serializer):
         farm = serializer.validated_data.get("farm", serializer.instance.farm)
-        if not farm or farm.owner != self.request.user:
+        if not farm or farm.owner_id != self.request.user.id:
             raise ValidationError({"farm": "You do not own this farm."})
         serializer.save()
 
@@ -214,54 +190,36 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
-        # Optional: lock account until email verification
         user.is_active = False
         user.save(update_fields=["is_active"])
 
-        sent = create_and_send_otp(user)
+        sent = create_and_send_otp(user, purpose=EmailOTP.Purpose.VERIFY_EMAIL)
 
         if not sent:
             return Response(
-                {
-                    "detail": "Registered, but email sending failed. You can request a new code.",
-                    "email": user.email,
-                },
+                {"detail": "Registered, but email sending failed. You can request a new code.", "email": user.email},
                 status=status.HTTP_201_CREATED,
             )
 
         return Response(
-            {
-                "detail": "Registered. Verification code sent to email.",
-                "email": user.email,
-            },
+            {"detail": "Registered. Verification code sent to email.", "email": user.email},
             status=status.HTTP_201_CREATED,
         )
 
 
 class LogoutView(APIView):
-    """
-    JWT logout: expects {"refresh": "..."} and blacklists it.
-    Requires: 'rest_framework_simplejwt.token_blacklist' in INSTALLED_APPS + migrations.
-    """
-
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         refresh_token = request.data.get("refresh")
         if not refresh_token:
-            return Response(
-                {"detail": "Refresh token is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Refresh token is required."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             token = RefreshToken(refresh_token)
             token.blacklist()
         except Exception:
-            return Response(
-                {"detail": "Invalid refresh token."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Invalid refresh token."}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({"message": "Logged out"}, status=status.HTTP_205_RESET_CONTENT)
 
@@ -270,14 +228,7 @@ class LogoutView(APIView):
 @permission_classes([IsAuthenticated])
 def me(request):
     user = request.user
-
-    # If you use django-allauth:
-    # from allauth.account.models import EmailAddress
-    # verified = EmailAddress.objects.filter(user=user, email=user.email, verified=True).exists()
-
-    # If you have your own OTP/email verification model, replace this logic:
-    verified = getattr(user, "email_verified", False)
-
+    verified = EmailAddress.objects.filter(user=user, email=user.email, verified=True).exists()
     return Response(
         {
             "id": user.id,
@@ -292,9 +243,9 @@ def me(request):
 class PasswordResetRequestView(APIView):
     """
     POST: {"email": "..."}
-    Sends a code to email (if user exists). Always returns 200 for security.
+    Sends RESET_PASSWORD OTP to email (if user exists).
+    Always returns 200 to avoid user enumeration.
     """
-
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -302,33 +253,10 @@ class PasswordResetRequestView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
 
-        # 6-digit code
-        code = f"{secrets.randbelow(10 ** 6):06d}"
-        cache_key = f"pwdreset:{email}"
-        cache.set(cache_key, code, timeout=10 * 60)  # 10 minutes
-
-        # SECURITY: don't reveal whether user exists
-        subject = "Password reset code"
-        message = f"Your password reset code: {code}\nThis code expires in 10 minutes."
-
-        try:
-            # send only if user exists (optional)
-            if User.objects.filter(email__iexact=email).exists():
-                send_mail(
-                    subject,
-                    message,
-                    settings.DEFAULT_FROM_EMAIL,
-                    [email],
-                    fail_silently=False,  # для дебага лучше False
-                )
-        except Exception:
-            # чтобы не падало 500 даже если SMTP сломался
-            return Response(
-                {
-                    "detail": "If this email exists, a reset code was sent (email sending may fail)."
-                },
-                status=status.HTTP_200_OK,
-            )
+        user = User.objects.filter(email__iexact=email).order_by("-id").first()
+        if user:
+            # send reset OTP (separate from verify OTP)
+            create_and_send_otp(user, purpose=EmailOTP.Purpose.RESET_PASSWORD)
 
         return Response(
             {"detail": "If this email exists, a reset code was sent."},
@@ -339,8 +267,8 @@ class PasswordResetRequestView(APIView):
 class PasswordResetConfirmView(APIView):
     """
     POST: {"email":"...", "code":"123456", "new_password":"...", "new_password2":"..."}
+    Uses EmailOTP(purpose=RESET_PASSWORD)
     """
-
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -351,28 +279,43 @@ class PasswordResetConfirmView(APIView):
         code = serializer.validated_data["code"]
         new_password = serializer.validated_data["new_password"]
 
-        cache_key = f"pwdreset:{email}"
-        saved_code = cache.get(cache_key)
-
-        if not saved_code or saved_code != code:
-            return Response(
-                {"detail": "Invalid or expired code."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        user = User.objects.filter(email__iexact=email).first()
+        user = User.objects.filter(email__iexact=email).order_by("-id").first()
         if not user:
-            # по идее сюда не попадешь, но оставим безопасно
-            return Response(
-                {"detail": "Invalid or expired code."},
-                status=status.HTTP_400_BAD_REQUEST,
+            return Response({"detail": "Invalid or expired code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp = (
+            EmailOTP.objects.filter(
+                user=user,
+                email=email,
+                purpose=EmailOTP.Purpose.RESET_PASSWORD,
+                used=False,
             )
+            .order_by("-created_at")
+            .first()
+        )
+        if not otp:
+            return Response({"detail": "Invalid or expired code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp.is_expired():
+            otp.used = True
+            otp.save(update_fields=["used"])
+            return Response({"detail": "Code expired. Send a new code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp.attempts_left <= 0:
+            otp.used = True
+            otp.save(update_fields=["used"])
+            return Response({"detail": "Too many attempts. Send a new code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if _hash(code) != otp.code_hash:
+            otp.attempts_left -= 1
+            otp.save(update_fields=["attempts_left"])
+            return Response({"detail": "Invalid code"}, status=status.HTTP_400_BAD_REQUEST)
+
+        # success
+        otp.used = True
+        otp.save(update_fields=["used"])
 
         user.set_password(new_password)
         user.save(update_fields=["password"])
 
-        cache.delete(cache_key)
-
-        return Response(
-            {"detail": "Password updated successfully."}, status=status.HTTP_200_OK
-        )
+        return Response({"detail": "Password updated successfully."}, status=status.HTTP_200_OK)
