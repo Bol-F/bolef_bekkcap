@@ -1,0 +1,27 @@
+{
+    "model_name": "CatBoostRegressor",
+    "feature_columns": [
+        "crop_type",
+        "farm_area_acres",
+        "irrigation_type",
+        "fertilizer_used_tons",
+        "pesticide_used_kg",
+        "soil_type",
+        "season",
+        "water_usage_cubic_meters"
+    ],
+    "categorical_features": [
+        "crop_type",
+        "irrigation_type",
+        "soil_type",
+        "season"
+    ],
+    "metrics": {
+        "mae": 10.7658,
+        "rmse": 12.7515,
+        "r2": -0.0183
+    },
+    "train_rows": 40,
+    "test_rows": 10,
+    "total_rows": 50
+}

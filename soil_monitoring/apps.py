@@ -4,7 +4,7 @@ from django.apps import AppConfig
 class SoilMonitoringConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "soil_monitoring"
-    verbose_name = 'Soil Monitoring System'
+    verbose_name = "Soil Monitoring System"
 
     def ready(self):
         """

@@ -1,5 +1,5 @@
-# farm/admin.py
 from django.contrib import admin
+<<<<<<< HEAD
 from django.db.models import Count
 from django.utils.html import mark_safe
 
@@ -37,21 +37,36 @@ class ActivityInline(admin.TabularInline):
 
 
 # ===== Farm =====
+=======
+
+from .models import (
+    Farm,
+    Field,
+    Crop,
+    Animal,
+    ActivityLog,
+    YieldRecord,
+    UserProfile,
+    EmailOTP,
+)
+
+
+>>>>>>> master
 @admin.register(Farm)
 class FarmAdmin(admin.ModelAdmin):
     list_display = (
+        "id",
         "name",
+        "farm_code",
         "owner",
         "location",
         "size_hectares",
-        "fields_count",
-        "animals_count",
         "created_at",
     )
-    list_filter = ("location", "created_at")
-    search_fields = ("name", "location", "owner__username")
-    date_hierarchy = "created_at"
+    search_fields = ("name", "farm_code", "location", "owner__username", "owner__email")
+    list_filter = ("created_at",)
     ordering = ("-created_at",)
+<<<<<<< HEAD
     list_per_page = 20
 
     inlines = [FieldInline, AnimalInline, ActivityInline]
@@ -125,13 +140,40 @@ class CropAdmin(admin.ModelAdmin):
 
 
 # ===== Animal =====
+=======
+
+
+@admin.register(Field)
+class FieldAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "farm", "area", "soil_type")
+    search_fields = ("name", "farm__name")
+    list_filter = ("soil_type", "farm")
+    ordering = ("id",)
+
+
+@admin.register(Crop)
+class CropAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "field",
+        "status",
+        "plant_date",
+        "expected_harvest_date",
+    )
+    search_fields = ("name", "field__name", "field__farm__name")
+    list_filter = ("status", "plant_date", "expected_harvest_date")
+    ordering = ("-id",)
+
+
+>>>>>>> master
 @admin.register(Animal)
 class AnimalAdmin(admin.ModelAdmin):
-    list_display = ("species", "tag_id", "farm", "health_status", "birth_date")
-    list_filter = ("species", "health_status", "farm")
+    list_display = ("id", "species", "tag_id", "farm", "health_status", "birth_date")
     search_fields = ("species", "tag_id", "farm__name")
-    date_hierarchy = "birth_date"
+    list_filter = ("health_status", "species")
     ordering = ("species", "tag_id")
+<<<<<<< HEAD
     list_per_page = 20
 
     list_select_related = ("farm", "farm__owner")
@@ -143,16 +185,24 @@ class AnimalAdmin(admin.ModelAdmin):
 
 
 # ===== ActivityLog =====
+=======
+
+
+>>>>>>> master
 @admin.register(ActivityLog)
 class ActivityLogAdmin(admin.ModelAdmin):
     list_display = (
+        "id",
+        "date",
         "activity_type",
         "farm",
-        "date",
-        "related_object",
+        "field",
+        "crop",
+        "animal",
         "created_by",
         "created_at",
     )
+<<<<<<< HEAD
     list_filter = ("activity_type", "date", "farm")
     search_fields = ("description", "farm__name", "created_by__username")
     date_hierarchy = "date"
@@ -181,13 +231,47 @@ class ActivityLogAdmin(admin.ModelAdmin):
 
 
 # ===== UserProfile (with avatar preview) =====
+=======
+    search_fields = (
+        "description",
+        "farm__name",
+        "field__name",
+        "crop__name",
+        "animal__tag_id",
+    )
+    list_filter = ("activity_type", "date", "created_at")
+    ordering = ("-date", "-created_at")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(YieldRecord)
+class YieldRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "farm",
+        "crop_type",
+        "season",
+        "irrigation_type",
+        "soil_type",
+        "farm_area_acres",
+        "actual_yield_tons",
+        "predicted_yield_tons",
+        "model_name",
+        "created_at",
+    )
+    search_fields = ("farm__name", "crop_type", "model_name", "notes")
+    list_filter = ("season", "irrigation_type", "soil_type", "model_name")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "prediction_created_at")
+
+
+>>>>>>> master
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("avatar_preview", "user", "bio", "phone")
-    search_fields = ("user__username", "phone", "bio")
-    list_per_page = 20
-    readonly_fields = ("avatar_preview",)
+    list_display = ("id", "user", "phone")
+    search_fields = ("user__username", "user__email", "phone")
 
+<<<<<<< HEAD
     list_select_related = ("user",)
 
     fieldsets = (
@@ -210,3 +294,21 @@ class UserProfileAdmin(admin.ModelAdmin):
 admin.site.site_header = "Farm Management Admin"
 admin.site.site_title = "Farm Admin"
 admin.site.index_title = "Farm Management Dashboard"
+=======
+
+@admin.register(EmailOTP)
+class EmailOTPAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "email",
+        "expires_at",
+        "attempts_left",
+        "used",
+        "created_at",
+    )
+    search_fields = ("email", "user__username", "user__email")
+    list_filter = ("used", "created_at")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at",)
+>>>>>>> master
