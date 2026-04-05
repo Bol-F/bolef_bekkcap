@@ -1,14 +1,13 @@
-# farm/views.py
-
 import secrets
-
+from django.shortcuts import get_object_or_404
+from .ml_service import predict_yield_for_record
+from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import transaction
-from rest_framework import permissions, status
-from rest_framework import viewsets
+from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -17,17 +16,18 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .email_otp_views import create_and_send_otp
-from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
+from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile, YieldRecord
 from .serializers import (
     ActivityLogSerializer,
     AnimalSerializer,
     CropSerializer,
     FarmSerializer,
     FieldSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     RegisterSerializer,
     UserProfileSerializer,
-    PasswordResetRequestSerializer,
-    PasswordResetConfirmSerializer,
+    YieldRecordSerializer,
 )
 
 User = get_user_model()
@@ -41,6 +41,7 @@ class IsOwnerRelatedPermission(permissions.BasePermission):
     - Crop: owner of crop.field.farm
     - Animal: owner of animal.farm
     - ActivityLog: owner of log.farm
+    - YieldRecord: owner of record.farm
     - UserProfile: profile owner only
     """
 
@@ -59,6 +60,8 @@ class IsOwnerRelatedPermission(permissions.BasePermission):
         if isinstance(obj, Animal):
             return obj.farm.owner == user
         if isinstance(obj, ActivityLog):
+            return obj.farm.owner == user
+        if isinstance(obj, YieldRecord):
             return obj.farm.owner == user
         if isinstance(obj, UserProfile):
             return obj.user == user
@@ -79,7 +82,6 @@ class FarmViewSet(viewsets.ModelViewSet):
         serializer.save(owner=self.request.user)
 
     def perform_update(self, serializer):
-        # owner must stay same
         serializer.save(owner=self.request.user)
 
 
@@ -95,8 +97,6 @@ class FieldViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        # Farm queryset already filtered in serializer __init__,
-        # but keep hard check for safety.
         farm = serializer.validated_data.get("farm")
         if not farm or farm.owner != self.request.user:
             raise ValidationError({"farm": "You do not own this farm."})
@@ -174,7 +174,6 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        # Your serializer.validate() already checks field/crop/animal belong to same farm.
         farm = serializer.validated_data.get("farm")
         if not farm or farm.owner != self.request.user:
             raise ValidationError({"farm": "You do not own this farm."})
@@ -184,6 +183,44 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
         farm = serializer.validated_data.get("farm", serializer.instance.farm)
         if not farm or farm.owner != self.request.user:
             raise ValidationError({"farm": "You do not own this farm."})
+        serializer.save()
+
+
+class YieldRecordViewSet(viewsets.ModelViewSet):
+    serializer_class = YieldRecordSerializer
+    permission_classes = [IsAuthenticated, IsOwnerRelatedPermission]
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return YieldRecord.objects.none()
+        return (
+            YieldRecord.objects.filter(farm__owner=self.request.user)
+            .select_related("farm", "farm__owner", "field", "field__farm")
+            .order_by("-created_at")
+        )
+
+    def perform_create(self, serializer):
+        farm = serializer.validated_data.get("farm")
+        field = serializer.validated_data.get("field")
+
+        if not farm or farm.owner != self.request.user:
+            raise ValidationError({"farm": "You do not own this farm."})
+
+        if field and field.farm_id != farm.id:
+            raise ValidationError({"field": "Field does not belong to the selected farm."})
+
+        serializer.save()
+
+    def perform_update(self, serializer):
+        farm = serializer.validated_data.get("farm", serializer.instance.farm)
+        field = serializer.validated_data.get("field", serializer.instance.field)
+
+        if not farm or farm.owner != self.request.user:
+            raise ValidationError({"farm": "You do not own this farm."})
+
+        if field and field.farm_id != farm.id:
+            raise ValidationError({"field": "Field does not belong to the selected farm."})
+
         serializer.save()
 
 
@@ -214,7 +251,6 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
-        # Optional: lock account until email verification
         user.is_active = False
         user.save(update_fields=["is_active"])
 
@@ -239,11 +275,6 @@ class RegisterView(APIView):
 
 
 class LogoutView(APIView):
-    """
-    JWT logout: expects {"refresh": "..."} and blacklists it.
-    Requires: 'rest_framework_simplejwt.token_blacklist' in INSTALLED_APPS + migrations.
-    """
-
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -270,13 +301,15 @@ class LogoutView(APIView):
 @permission_classes([IsAuthenticated])
 def me(request):
     user = request.user
+    email = (getattr(user, "email", "") or "").strip().lower()
 
-    # If you use django-allauth:
-    # from allauth.account.models import EmailAddress
-    # verified = EmailAddress.objects.filter(user=user, email=user.email, verified=True).exists()
-
-    # If you have your own OTP/email verification model, replace this logic:
-    verified = getattr(user, "email_verified", False)
+    verified = False
+    if email:
+        verified = EmailAddress.objects.filter(
+            user=user,
+            email__iexact=email,
+            verified=True,
+        ).exists()
 
     return Response(
         {
@@ -284,17 +317,12 @@ def me(request):
             "username": user.username,
             "email": user.email,
             "is_active": user.is_active,
-            "email_verified": bool(verified),
+            "email_verified": verified,
         }
     )
 
 
 class PasswordResetRequestView(APIView):
-    """
-    POST: {"email": "..."}
-    Sends a code to email (if user exists). Always returns 200 for security.
-    """
-
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -302,27 +330,24 @@ class PasswordResetRequestView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
 
-        # 6-digit code
-        code = f"{secrets.randbelow(10 ** 6):06d}"
+        code = f"{secrets.randbelow(10**6):06d}"
         cache_key = f"pwdreset:{email}"
-        cache.set(cache_key, code, timeout=10 * 60)  # 10 minutes
+        cache.set(cache_key, code, timeout=10 * 60)
 
-        # SECURITY: don't reveal whether user exists
         subject = "Password reset code"
         message = f"Your password reset code: {code}\nThis code expires in 10 minutes."
 
         try:
-            # send only if user exists (optional)
             if User.objects.filter(email__iexact=email).exists():
                 send_mail(
                     subject,
                     message,
-                    settings.DEFAULT_FROM_EMAIL,
+                    getattr(settings, "DEFAULT_FROM_EMAIL", None)
+                    or getattr(settings, "EMAIL_HOST_USER", None),
                     [email],
-                    fail_silently=False,  # для дебага лучше False
+                    fail_silently=False,
                 )
         except Exception:
-            # чтобы не падало 500 даже если SMTP сломался
             return Response(
                 {
                     "detail": "If this email exists, a reset code was sent (email sending may fail)."
@@ -337,10 +362,6 @@ class PasswordResetRequestView(APIView):
 
 
 class PasswordResetConfirmView(APIView):
-    """
-    POST: {"email":"...", "code":"123456", "new_password":"...", "new_password2":"..."}
-    """
-
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -362,7 +383,6 @@ class PasswordResetConfirmView(APIView):
 
         user = User.objects.filter(email__iexact=email).first()
         if not user:
-            # по идее сюда не попадешь, но оставим безопасно
             return Response(
                 {"detail": "Invalid or expired code."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -374,5 +394,26 @@ class PasswordResetConfirmView(APIView):
         cache.delete(cache_key)
 
         return Response(
-            {"detail": "Password updated successfully."}, status=status.HTTP_200_OK
+            {"detail": "Password updated successfully."},
+            status=status.HTTP_200_OK,
+        )
+
+class PredictYieldView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        record = get_object_or_404(
+            YieldRecord.objects.select_related("farm"),
+            pk=pk,
+            farm__owner=request.user,
+        )
+
+        result = predict_yield_for_record(record)
+
+        return Response(
+            {
+                "detail": "Prediction completed successfully.",
+                "data": result,
+            },
+            status=status.HTTP_200_OK,
         )

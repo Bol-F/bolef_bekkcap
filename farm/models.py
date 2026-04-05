@@ -1,17 +1,50 @@
 from django.contrib.auth import get_user_model
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
 
 User = get_user_model()
 
 
+SOIL_CHOICES = [
+    ("loamy", "Loamy"),
+    ("sandy", "Sandy"),
+    ("clay", "Clay"),
+    ("silty", "Silty"),
+    ("peaty", "Peaty"),
+    ("other", "Other"),
+]
+
+SEASON_CHOICES = [
+    ("kharif", "Kharif"),
+    ("rabi", "Rabi"),
+    ("zaid", "Zaid"),
+    ("other", "Other"),
+]
+
+IRRIGATION_CHOICES = [
+    ("drip", "Drip"),
+    ("sprinkler", "Sprinkler"),
+    ("manual", "Manual"),
+    ("flood", "Flood"),
+    ("rainfed", "Rain-fed"),
+    ("other", "Other"),
+]
+
+
 class Farm(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="farms")
     name = models.CharField(max_length=100)
+    farm_code = models.CharField(
+        max_length=20,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Optional external farm ID like F001",
+    )
     location = models.CharField(max_length=200, blank=True)
     size_hectares = models.DecimalField(
-        max_digits=6,
+        max_digits=8,
         decimal_places=2,
         null=True,
         blank=True,
@@ -22,34 +55,28 @@ class Farm(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [models.Index(fields=["owner", "-created_at"])]
+        indexes = [
+            models.Index(fields=["owner", "-created_at"]),
+            models.Index(fields=["farm_code"]),
+        ]
 
     def __str__(self):
-        # username может быть пустой в некоторых кастомных User — но обычно есть
         return f"{self.name} ({getattr(self.owner, 'username', self.owner_id)})"
 
 
 class Field(models.Model):
-    SOIL_CHOICES = [
-        ("loam", "Loam"),
-        ("sand", "Sandy"),
-        ("clay", "Clay"),
-        ("other", "Other"),
-    ]
-
     farm = models.ForeignKey(Farm, on_delete=models.CASCADE, related_name="fields")
     name = models.CharField(max_length=100)
     area = models.DecimalField(
-        max_digits=6,
+        max_digits=8,
         decimal_places=2,
         validators=[MinValueValidator(0)],
         help_text="Field area in hectares",
     )
-    soil_type = models.CharField(max_length=20, choices=SOIL_CHOICES, default="loam")
+    soil_type = models.CharField(max_length=20, choices=SOIL_CHOICES, default="loamy")
 
     class Meta:
         ordering = ["id"]
-        # чтобы в одной ферме не было двух одинаковых полей с одним именем
         constraints = [
             models.UniqueConstraint(
                 fields=["farm", "name"], name="uniq_field_name_per_farm"
@@ -90,7 +117,7 @@ class Animal(models.Model):
     ]
 
     farm = models.ForeignKey(Farm, on_delete=models.CASCADE, related_name="animals")
-    species = models.CharField(max_length=50)  # e.g. Cow, Sheep, Chicken
+    species = models.CharField(max_length=50)
     tag_id = models.CharField(
         max_length=50,
         unique=True,
@@ -124,7 +151,6 @@ class ActivityLog(models.Model):
     activity_type = models.CharField(max_length=20, choices=ACTIVITY_CHOICES)
     description = models.TextField(blank=True)
 
-    # Optional links (nullable)
     field = models.ForeignKey(
         Field,
         on_delete=models.SET_NULL,
@@ -167,6 +193,101 @@ class ActivityLog(models.Model):
         return f"{self.activity_type} on {self.date} ({self.farm.name})"
 
 
+class YieldRecord(models.Model):
+    """
+    Main ML-ready table.
+    One row = one training / prediction record.
+    This matches the agricultural dataset structure much better than putting
+    everything directly inside Farm or Crop.
+    """
+
+    farm = models.ForeignKey(
+        Farm,
+        on_delete=models.CASCADE,
+        related_name="yield_records",
+    )
+    field = models.ForeignKey(
+        Field,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="yield_records",
+    )
+
+    crop_type = models.CharField(max_length=100)
+    season = models.CharField(max_length=20, choices=SEASON_CHOICES)
+    irrigation_type = models.CharField(max_length=20, choices=IRRIGATION_CHOICES)
+    soil_type = models.CharField(max_length=20, choices=SOIL_CHOICES)
+
+    farm_area_acres = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+    )
+    fertilizer_used_tons = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    pesticide_used_kg = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+    water_usage_cubic_meters = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        validators=[MinValueValidator(0)],
+    )
+
+    actual_yield_tons = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+        help_text="Real yield from dataset or from actual harvest",
+    )
+
+    predicted_yield_tons = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+        help_text="ML predicted yield",
+    )
+
+    model_name = models.CharField(max_length=100, blank=True)
+    confidence_score = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Optional confidence in percent",
+    )
+
+    notes = models.TextField(blank=True)
+    prediction_created_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["farm", "crop_type"]),
+            models.Index(fields=["season"]),
+            models.Index(fields=["irrigation_type"]),
+            models.Index(fields=["soil_type"]),
+        ]
+
+    def __str__(self):
+        return f"{self.farm.name} - {self.crop_type} - {self.season}"
+
+
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     avatar = models.ImageField(upload_to="profiles/", null=True, blank=True)
@@ -185,7 +306,7 @@ class EmailOTP(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="email_otps")
     email = models.EmailField(db_index=True)
-    code_hash = models.CharField(max_length=64)  # sha256 hex = 64 chars
+    code_hash = models.CharField(max_length=64)
     expires_at = models.DateTimeField()
     attempts_left = models.PositiveSmallIntegerField(default=5)
     used = models.BooleanField(default=False)

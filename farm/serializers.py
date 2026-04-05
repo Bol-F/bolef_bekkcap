@@ -1,10 +1,10 @@
 from django.contrib.auth import get_user_model
-from rest_framework.exceptions import ValidationError
-
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
-from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
+from rest_framework.exceptions import ValidationError
+
+from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile, YieldRecord
 
 User = get_user_model()
 
@@ -140,9 +140,6 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             self.fields["animal"].queryset = Animal.objects.filter(farm__owner=user)
 
     def validate(self, attrs):
-        """
-        Rule: if field/crop/animal provided, they must belong to the same farm.
-        """
         farm = attrs.get("farm") or getattr(self.instance, "farm", None)
         field = attrs.get("field") or getattr(self.instance, "field", None)
         crop = attrs.get("crop") or getattr(self.instance, "crop", None)
@@ -152,11 +149,74 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             raise ValidationError({"farm": "This field is required."})
 
         if field and field.farm_id != farm.id:
-            raise ValidationError("Field does not belong to the selected farm.")
+            raise ValidationError({"field": "Field does not belong to the selected farm."})
         if crop and crop.field.farm_id != farm.id:
-            raise ValidationError("Crop does not belong to the selected farm.")
+            raise ValidationError({"crop": "Crop does not belong to the selected farm."})
         if animal and animal.farm_id != farm.id:
-            raise ValidationError("Animal does not belong to the selected farm.")
+            raise ValidationError({"animal": "Animal does not belong to the selected farm."})
+
+        return attrs
+
+
+# ==========================
+# YieldRecord (ML)
+# ==========================
+class YieldRecordSerializer(serializers.ModelSerializer):
+    farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
+    field = serializers.PrimaryKeyRelatedField(
+        queryset=Field.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = YieldRecord
+        fields = [
+            "id",
+            "farm",
+            "field",
+            "crop_type",
+            "season",
+            "irrigation_type",
+            "soil_type",
+            "farm_area_acres",
+            "fertilizer_used_tons",
+            "pesticide_used_kg",
+            "water_usage_cubic_meters",
+            "actual_yield_tons",
+            "predicted_yield_tons",
+            "model_name",
+            "confidence_score",
+            "notes",
+            "prediction_created_at",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "predicted_yield_tons",
+            "model_name",
+            "confidence_score",
+            "prediction_created_at",
+            "created_at",
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            user = request.user
+            self.fields["farm"].queryset = Farm.objects.filter(owner=user)
+            self.fields["field"].queryset = Field.objects.filter(farm__owner=user)
+
+    def validate(self, attrs):
+        farm = attrs.get("farm") or getattr(self.instance, "farm", None)
+        field = attrs.get("field") or getattr(self.instance, "field", None)
+
+        if not farm:
+            raise ValidationError({"farm": "This field is required."})
+
+        if field and field.farm_id != farm.id:
+            raise ValidationError({"field": "Field does not belong to the selected farm."})
 
         return attrs
 
@@ -174,15 +234,16 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 
 # ==========================
-# Registration (optional)
+# Registration
 # ==========================
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
-    password2 = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
+    password2 = serializers.CharField(write_only=True, trim_whitespace=False)
 
     class Meta:
         model = User
         fields = ("id", "username", "email", "password", "password2")
+        read_only_fields = ("id",)
 
     def validate_email(self, value):
         email = (value or "").strip().lower()
@@ -192,9 +253,15 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("User with this email already exists.")
         return email
 
+    def validate_username(self, value):
+        username = (value or "").strip()
+        if not username:
+            raise serializers.ValidationError("Username is required.")
+        return username
+
     def validate(self, attrs):
         if attrs["password"] != attrs["password2"]:
-            raise serializers.ValidationError({"password": "Passwords must match."})
+            raise serializers.ValidationError({"password2": "Passwords must match."})
         validate_password(attrs["password"])
         return attrs
 
@@ -205,7 +272,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 # ==========================
-# Password Reset (OTP via email)
+# Password Reset
 # ==========================
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -217,12 +284,14 @@ class PasswordResetRequestSerializer(serializers.Serializer):
 class PasswordResetConfirmSerializer(serializers.Serializer):
     email = serializers.EmailField()
     code = serializers.CharField(max_length=10)
-    new_password = serializers.CharField(write_only=True)
-    new_password2 = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password2 = serializers.CharField(write_only=True, trim_whitespace=False)
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["new_password2"]:
-            raise serializers.ValidationError({"new_password": "Passwords must match."})
+            raise serializers.ValidationError(
+                {"new_password2": "Passwords must match."}
+            )
         validate_password(attrs["new_password"])
         attrs["email"] = (attrs["email"] or "").strip().lower()
         attrs["code"] = (attrs["code"] or "").strip()
@@ -245,7 +314,6 @@ class SetPasswordSerializer(serializers.Serializer):
         try:
             validate_password(password, user)
         except DjangoValidationError as e:
-            # Convert Django password validator errors -> DRF field errors
             raise serializers.ValidationError({"password": list(e.messages)})
 
         return attrs

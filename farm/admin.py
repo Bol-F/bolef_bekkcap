@@ -1,255 +1,128 @@
-# farm/admin.py
 from django.contrib import admin
-from django.utils.html import mark_safe
 
-from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
-
-# ===== Inlines =====
-
-
-class FieldInline(admin.TabularInline):
-    model = Field
-    extra = 0
-    fields = ("name", "area", "soil_type")
-    show_change_link = True
-
-
-class AnimalInline(admin.TabularInline):
-    model = Animal
-    extra = 0
-    fields = ("species", "tag_id", "health_status", "birth_date")
-    show_change_link = True
-
-
-class ActivityInline(admin.TabularInline):
-    model = ActivityLog
-    extra = 0
-    fields = ("activity_type", "date", "description")
-    show_change_link = True
-
-
-# ===== Farm =====
+from .models import (
+    Farm,
+    Field,
+    Crop,
+    Animal,
+    ActivityLog,
+    YieldRecord,
+    UserProfile,
+    EmailOTP,
+)
 
 
 @admin.register(Farm)
 class FarmAdmin(admin.ModelAdmin):
     list_display = (
+        "id",
         "name",
+        "farm_code",
         "owner",
         "location",
         "size_hectares",
-        "fields_count",
-        "animals_count",
         "created_at",
     )
-    list_filter = ("location", "created_at")
-    search_fields = ("name", "location", "owner__username")
-    date_hierarchy = "created_at"
+    search_fields = ("name", "farm_code", "location", "owner__username", "owner__email")
+    list_filter = ("created_at",)
     ordering = ("-created_at",)
-    list_per_page = 20
-
-    inlines = [FieldInline, AnimalInline, ActivityInline]
-
-    fieldsets = (
-        (
-            "Basic info",
-            {
-                "fields": ("owner", "name", "location"),
-            },
-        ),
-        (
-            "Details",
-            {
-                "fields": ("size_hectares",),
-            },
-        ),
-    )
-
-    def fields_count(self, obj):
-        return obj.fields.count()
-
-    fields_count.short_description = "Fields"
-
-    def animals_count(self, obj):
-        return obj.animals.count()
-
-    animals_count.short_description = "Animals"
-
-
-# ===== Field =====
 
 
 @admin.register(Field)
 class FieldAdmin(admin.ModelAdmin):
-    list_display = ("name", "farm", "area", "soil_type")
-    list_filter = ("soil_type", "farm")
+    list_display = ("id", "name", "farm", "area", "soil_type")
     search_fields = ("name", "farm__name")
-    ordering = ("farm", "name")
-    list_per_page = 20
-
-    fieldsets = (
-        (
-            "Field info",
-            {
-                "fields": ("farm", "name", "area"),
-            },
-        ),
-        (
-            "Soil",
-            {
-                "fields": ("soil_type",),
-            },
-        ),
-    )
-
-
-# ===== Crop =====
+    list_filter = ("soil_type", "farm")
+    ordering = ("id",)
 
 
 @admin.register(Crop)
 class CropAdmin(admin.ModelAdmin):
-    list_display = ("name", "field", "status", "plant_date", "expected_harvest_date")
-    list_filter = ("status", "plant_date", "expected_harvest_date")
-    search_fields = ("name", "field__name")
-    date_hierarchy = "plant_date"
-    ordering = ("-plant_date",)
-    list_per_page = 20
-
-    fieldsets = (
-        (
-            "Basic info",
-            {
-                "fields": ("field", "name", "status"),
-            },
-        ),
-        (
-            "Dates",
-            {
-                "fields": ("plant_date", "expected_harvest_date"),
-            },
-        ),
+    list_display = (
+        "id",
+        "name",
+        "field",
+        "status",
+        "plant_date",
+        "expected_harvest_date",
     )
-
-
-# ===== Animal =====
+    search_fields = ("name", "field__name", "field__farm__name")
+    list_filter = ("status", "plant_date", "expected_harvest_date")
+    ordering = ("-id",)
 
 
 @admin.register(Animal)
 class AnimalAdmin(admin.ModelAdmin):
-    list_display = ("species", "tag_id", "farm", "health_status", "birth_date")
-    list_filter = ("species", "health_status", "farm")
+    list_display = ("id", "species", "tag_id", "farm", "health_status", "birth_date")
     search_fields = ("species", "tag_id", "farm__name")
-    date_hierarchy = "birth_date"
+    list_filter = ("health_status", "species")
     ordering = ("species", "tag_id")
-    list_per_page = 20
-
-    fieldsets = (
-        (
-            "Identity",
-            {
-                "fields": ("farm", "species", "tag_id"),
-            },
-        ),
-        (
-            "Health & dates",
-            {
-                "fields": ("health_status", "birth_date"),
-            },
-        ),
-    )
-
-
-# ===== ActivityLog =====
 
 
 @admin.register(ActivityLog)
 class ActivityLogAdmin(admin.ModelAdmin):
     list_display = (
+        "id",
+        "date",
         "activity_type",
         "farm",
-        "date",
-        "related_object",
+        "field",
+        "crop",
+        "animal",
         "created_by",
         "created_at",
     )
-    list_filter = ("activity_type", "date", "farm")
-    search_fields = ("description", "farm__name", "created_by__username")
-    date_hierarchy = "date"
-    ordering = ("-date", "-created_at")
-    list_per_page = 20
-
-    fieldsets = (
-        (
-            "Activity",
-            {
-                "fields": ("farm", "date", "activity_type", "description"),
-            },
-        ),
-        (
-            "Related objects",
-            {
-                "fields": ("field", "crop", "animal"),
-            },
-        ),
-        (
-            "Audit",
-            {
-                "fields": ("created_by",),
-            },
-        ),
+    search_fields = (
+        "description",
+        "farm__name",
+        "field__name",
+        "crop__name",
+        "animal__tag_id",
     )
-    readonly_fields = ("created_by", "created_at")
-
-    def related_object(self, obj):
-        if obj.field:
-            return f"Field: {obj.field.name}"
-        if obj.crop:
-            return f"Crop: {obj.crop.name}"
-        if obj.animal:
-            return f"Animal: {obj.animal.tag_id}"
-        return "-"
-
-    related_object.short_description = "Related to"
+    list_filter = ("activity_type", "date", "created_at")
+    ordering = ("-date", "-created_at")
+    readonly_fields = ("created_at",)
 
 
-# ===== UserProfile (with avatar preview) =====
+@admin.register(YieldRecord)
+class YieldRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "farm",
+        "crop_type",
+        "season",
+        "irrigation_type",
+        "soil_type",
+        "farm_area_acres",
+        "actual_yield_tons",
+        "predicted_yield_tons",
+        "model_name",
+        "created_at",
+    )
+    search_fields = ("farm__name", "crop_type", "model_name", "notes")
+    list_filter = ("season", "irrigation_type", "soil_type", "model_name")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "prediction_created_at")
 
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("avatar_preview", "user", "bio", "phone")
-    search_fields = ("user__username", "phone", "bio")
-    list_per_page = 20
-    readonly_fields = ("avatar_preview",)
+    list_display = ("id", "user", "phone")
+    search_fields = ("user__username", "user__email", "phone")
 
-    fieldsets = (
-        (
-            "User",
-            {
-                "fields": ("user",),
-            },
-        ),
-        (
-            "Profile",
-            {
-                "fields": ("avatar_preview", "avatar", "bio", "phone"),
-            },
-        ),
+
+@admin.register(EmailOTP)
+class EmailOTPAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "email",
+        "expires_at",
+        "attempts_left",
+        "used",
+        "created_at",
     )
-
-    def avatar_preview(self, obj):
-        if obj.avatar and hasattr(obj.avatar, "url"):
-            return mark_safe(
-                f'<img src="{obj.avatar.url}" width="40" height="40" '
-                f'style="object-fit: cover; border-radius: 50%; border: 1px solid #ccc;" />'
-            )
-        return "-"
-
-    avatar_preview.short_description = "Avatar"
-
-
-# ===== Global admin branding =====
-
-admin.site.site_header = "Farm Management Admin"
-admin.site.site_title = "Farm Admin"
-admin.site.index_title = "Farm Management Dashboard"
+    search_fields = ("email", "user__username", "user__email")
+    list_filter = ("used", "created_at")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at",)

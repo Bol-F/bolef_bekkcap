@@ -19,6 +19,8 @@ from .views import (
     UserProfileViewSet,
     PasswordResetConfirmView,
     PasswordResetRequestView,
+    YieldRecordViewSet,
+    PredictYieldView,
     me,
 )
 
@@ -28,14 +30,10 @@ router.register(r"fields", FieldViewSet, basename="field")
 router.register(r"crops", CropViewSet, basename="crop")
 router.register(r"animals", AnimalViewSet, basename="animal")
 router.register(r"activities", ActivityLogViewSet, basename="activity")
-router.register(
-    r"profiles", UserProfileViewSet, basename="profile"
-)  # plural is cleaner
+router.register(r"yield-records", YieldRecordViewSet, basename="yield-record")
+router.register(r"profiles", UserProfileViewSet, basename="profile")
 
 urlpatterns = [
-    # ==========================
-    # AUTH (JWT + custom)
-    # ==========================
     path("profiles/me/", me, name="profiles-me"),
     path("auth/register/", RegisterView.as_view(), name="auth-register"),
     path("auth/login/", TokenObtainPairView.as_view(), name="auth-login"),
@@ -43,18 +41,12 @@ urlpatterns = [
     path("auth/verify/", TokenVerifyView.as_view(), name="auth-verify"),
     path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
     path("auth/set-password/", set_password, name="auth-set-password"),
-    # ==========================
-    # EMAIL OTP
-    # ==========================
+
     path("auth/email/send-code/", send_email_code, name="send_email_code"),
     path("auth/email/verify-code/", verify_email_code, name="verify_email_code"),
-    # ==========================
-    # API resources
-    # ==========================
+
     path("", include(router.urls)),
-    # =============================
-    # vostanovka paroli
-    # ===============================
+
     path(
         "auth/password-reset/",
         PasswordResetRequestView.as_view(),
@@ -65,4 +57,9 @@ urlpatterns = [
         PasswordResetConfirmView.as_view(),
         name="password_reset_confirm",
     ),
+path(
+    "yield-records/<int:pk>/predict/",
+    PredictYieldView.as_view(),
+    name="yield-record-predict",
+),
 ]
