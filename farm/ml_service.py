@@ -8,7 +8,6 @@ from django.utils import timezone
 
 from .models import YieldRecord
 
-
 MODEL_DIR = Path(settings.BASE_DIR) / "ml_artifacts"
 MODEL_PATH = MODEL_DIR / "yield_catboost_model.cbm"
 META_PATH = MODEL_DIR / "yield_catboost_model_meta.json"
@@ -66,7 +65,7 @@ def load_model_and_metadata():
     return model, metadata
 
 
-def build_features_from_yield_record(record, feature_columns):
+def build_features_from_yield_record(record: YieldRecord, feature_columns: list[str]) -> pd.DataFrame:
     data = {
         "crop_type": str(record.crop_type).strip(),
         "farm_area_acres": float(record.farm_area_acres),
@@ -83,7 +82,7 @@ def build_features_from_yield_record(record, feature_columns):
     return df
 
 
-def predict_yield_for_record(record: YieldRecord):
+def predict_yield_for_record(record: YieldRecord) -> dict:
     model, metadata = load_model_and_metadata()
     feature_columns = metadata["feature_columns"]
 

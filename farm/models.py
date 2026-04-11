@@ -1,9 +1,5 @@
 from django.contrib.auth import get_user_model
-<<<<<<< HEAD
 from django.core.validators import MaxValueValidator, MinValueValidator
-=======
-from django.core.validators import MinValueValidator, MaxValueValidator
->>>>>>> master
 from django.db import models
 from django.utils import timezone
 
@@ -60,7 +56,7 @@ class Farm(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["owner", "-created_at"]),
+            models.Index(fields=["owner", "created_at"]),
             models.Index(fields=["farm_code"]),
         ]
 
@@ -78,18 +74,13 @@ class Field(models.Model):
         help_text="Field area in hectares",
     )
     soil_type = models.CharField(max_length=20, choices=SOIL_CHOICES, default="loamy")
-
-    # ✅ Location (Variant B)
-    # latitude:  -90..90
-    # longitude: -180..180
-    # Using DecimalField for stable precision (good for weather APIs).
     latitude = models.DecimalField(
         max_digits=9,
         decimal_places=6,
         null=True,
         blank=True,
         validators=[MinValueValidator(-90), MaxValueValidator(90)],
-        help_text="Latitude in degrees (-90..90)",
+        help_text="Field latitude",
     )
     longitude = models.DecimalField(
         max_digits=9,
@@ -97,19 +88,16 @@ class Field(models.Model):
         null=True,
         blank=True,
         validators=[MinValueValidator(-180), MaxValueValidator(180)],
-        help_text="Longitude in degrees (-180..180)",
-    )
-    location_text = models.CharField(
-        max_length=255,
-        blank=True,
-        default="",
-        help_text="Human-readable location (optional)",
+        help_text="Field longitude",
     )
 
     class Meta:
         ordering = ["id"]
         constraints = [
-            models.UniqueConstraint(fields=["farm", "name"], name="uniq_field_name_per_farm")
+            models.UniqueConstraint(
+                fields=["farm", "name"],
+                name="uniq_field_name_per_farm",
+            )
         ]
         indexes = [models.Index(fields=["farm"])]
 
@@ -153,7 +141,11 @@ class Animal(models.Model):
         help_text="Unique ID for the animal (ear tag, etc.)",
     )
     birth_date = models.DateField(null=True, blank=True)
-    health_status = models.CharField(max_length=20, choices=HEALTH_CHOICES, default="good")
+    health_status = models.CharField(
+        max_length=20,
+        choices=HEALTH_CHOICES,
+        default="good",
+    )
 
     class Meta:
         ordering = ["species", "tag_id"]
@@ -212,7 +204,7 @@ class ActivityLog(models.Model):
     class Meta:
         ordering = ["-date", "-created_at"]
         indexes = [
-            models.Index(fields=["farm", "-date"]),
+            models.Index(fields=["farm", "date"]),
             models.Index(fields=["activity_type"]),
         ]
 
@@ -221,13 +213,6 @@ class ActivityLog(models.Model):
 
 
 class YieldRecord(models.Model):
-    """
-    Main ML-ready table.
-    One row = one training / prediction record.
-    This matches the agricultural dataset structure much better than putting
-    everything directly inside Farm or Crop.
-    """
-
     farm = models.ForeignKey(
         Farm,
         on_delete=models.CASCADE,
@@ -326,30 +311,9 @@ class UserProfile(models.Model):
 
 
 class EmailOTP(models.Model):
-    """
-    One-time code for email verification / password reset.
-    Stores only hash of the code (sha256), not the raw code.
-    """
-
-    class Purpose(models.TextChoices):
-        VERIFY_EMAIL = "VERIFY_EMAIL", "VERIFY_EMAIL"
-        RESET_PASSWORD = "RESET_PASSWORD", "RESET_PASSWORD"
-
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="email_otps")
     email = models.EmailField(db_index=True)
-<<<<<<< HEAD
-
-    purpose = models.CharField(
-        max_length=32,
-        choices=Purpose.choices,
-        default=Purpose.VERIFY_EMAIL,
-        db_index=True,
-    )
-
-    code_hash = models.CharField(max_length=64)  # sha256 hex = 64 chars
-=======
     code_hash = models.CharField(max_length=64)
->>>>>>> master
     expires_at = models.DateTimeField()
     attempts_left = models.PositiveSmallIntegerField(default=5)
     used = models.BooleanField(default=False)
@@ -358,16 +322,12 @@ class EmailOTP(models.Model):
     class Meta:
         ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=["email", "purpose", "used", "-created_at"]),
-            models.Index(fields=["user", "purpose", "-created_at"]),
+            models.Index(fields=["email", "used", "created_at"]),
+            models.Index(fields=["user", "created_at"]),
         ]
 
     def is_expired(self) -> bool:
         return timezone.now() >= self.expires_at
 
     def __str__(self):
-<<<<<<< HEAD
-        return f"OTP({self.email}) purpose={self.purpose} used={self.used} exp={self.expires_at}"
-=======
         return f"OTP({self.email}) used={self.used} exp={self.expires_at}"
->>>>>>> master

@@ -6,7 +6,7 @@ from rest_framework_simplejwt.views import (
     TokenVerifyView,
 )
 
-from .auth_views import set_password
+from .auth_views import GoogleLogin, exchange_google_code, set_password
 from .email_otp_views import send_email_code, verify_email_code
 from .views import (
     ActivityLogViewSet,
@@ -14,13 +14,14 @@ from .views import (
     CropViewSet,
     FarmViewSet,
     FieldViewSet,
+    FieldWateringStatusView,
     LogoutView,
-    RegisterView,
-    UserProfileViewSet,
     PasswordResetConfirmView,
     PasswordResetRequestView,
-    YieldRecordViewSet,
     PredictYieldView,
+    RegisterView,
+    UserProfileViewSet,
+    YieldRecordViewSet,
     me,
 )
 
@@ -35,6 +36,7 @@ router.register(r"profiles", UserProfileViewSet, basename="profile")
 
 urlpatterns = [
     path("profiles/me/", me, name="profiles-me"),
+
     path("auth/register/", RegisterView.as_view(), name="auth-register"),
     path("auth/login/", TokenObtainPairView.as_view(), name="auth-login"),
     path("auth/refresh/", TokenRefreshView.as_view(), name="auth-refresh"),
@@ -42,8 +44,26 @@ urlpatterns = [
     path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
     path("auth/set-password/", set_password, name="auth-set-password"),
 
+    path("auth/google/", GoogleLogin.as_view(), name="google-login"),
+    path(
+        "auth/google/exchange-code/",
+        exchange_google_code,
+        name="exchange-google-code",
+    ),
+
     path("auth/email/send-code/", send_email_code, name="send_email_code"),
     path("auth/email/verify-code/", verify_email_code, name="verify_email_code"),
+
+    path(
+        "yield-records/<int:pk>/predict/",
+        PredictYieldView.as_view(),
+        name="yield-record-predict",
+    ),
+    path(
+        "fields/<int:pk>/watering-status/",
+        FieldWateringStatusView.as_view(),
+        name="field-watering-status",
+    ),
 
     path("", include(router.urls)),
 
@@ -57,9 +77,4 @@ urlpatterns = [
         PasswordResetConfirmView.as_view(),
         name="password_reset_confirm",
     ),
-path(
-    "yield-records/<int:pk>/predict/",
-    PredictYieldView.as_view(),
-    name="yield-record-predict",
-),
 ]

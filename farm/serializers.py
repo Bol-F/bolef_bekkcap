@@ -2,21 +2,13 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
-<<<<<<< HEAD
-
-from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile
-=======
 from rest_framework.exceptions import ValidationError
 
 from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile, YieldRecord
->>>>>>> master
 
 User = get_user_model()
 
 
-# ==========================
-# Farm
-# ==========================
 class FarmSerializer(serializers.ModelSerializer):
     owner = serializers.ReadOnlyField(source="owner.username")
 
@@ -26,9 +18,6 @@ class FarmSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "owner", "created_at"]
 
 
-# ==========================
-# Field
-# ==========================
 class FieldSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
 
@@ -40,10 +29,8 @@ class FieldSerializer(serializers.ModelSerializer):
             "name",
             "area",
             "soil_type",
-            # ✅ location (Variant B)
             "latitude",
             "longitude",
-            "location_text",
         ]
         read_only_fields = ["id"]
 
@@ -53,34 +40,7 @@ class FieldSerializer(serializers.ModelSerializer):
         if request and request.user.is_authenticated:
             self.fields["farm"].queryset = Farm.objects.filter(owner=request.user)
 
-    def validate(self, attrs):
-        """
-        - If latitude provided, longitude must also be provided (and vice versa)
-        - Values are also constrained by model validators, but we give clean API errors here
-        """
-        instance = getattr(self, "instance", None)
 
-        lat = attrs.get("latitude", getattr(instance, "latitude", None))
-        lon = attrs.get("longitude", getattr(instance, "longitude", None))
-
-        # If one is set and the other is missing -> error
-        if (lat is None) ^ (lon is None):
-            raise ValidationError("Both latitude and longitude must be provided together.")
-
-        # Optional: explicit range validation (model already has validators)
-        if lat is not None:
-            if lat < -90 or lat > 90:
-                raise ValidationError({"latitude": "Latitude must be between -90 and 90."})
-        if lon is not None:
-            if lon < -180 or lon > 180:
-                raise ValidationError({"longitude": "Longitude must be between -180 and 180."})
-
-        return attrs
-
-
-# ==========================
-# Crop
-# ==========================
 class CropSerializer(serializers.ModelSerializer):
     field = serializers.PrimaryKeyRelatedField(queryset=Field.objects.all())
     status_display = serializers.CharField(source="get_status_display", read_only=True)
@@ -102,15 +62,17 @@ class CropSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         request = self.context.get("request")
         if request and request.user.is_authenticated:
-            self.fields["field"].queryset = Field.objects.filter(farm__owner=request.user)
+            self.fields["field"].queryset = Field.objects.filter(
+                farm__owner=request.user
+            )
 
 
-# ==========================
-# Animal
-# ==========================
 class AnimalSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
-    health_status_display = serializers.CharField(source="get_health_status_display", read_only=True)
+    health_status_display = serializers.CharField(
+        source="get_health_status_display",
+        read_only=True,
+    )
 
     class Meta:
         model = Animal
@@ -132,14 +94,23 @@ class AnimalSerializer(serializers.ModelSerializer):
             self.fields["farm"].queryset = Farm.objects.filter(owner=request.user)
 
 
-# ==========================
-# ActivityLog
-# ==========================
 class ActivityLogSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
-    field = serializers.PrimaryKeyRelatedField(queryset=Field.objects.all(), required=False, allow_null=True)
-    crop = serializers.PrimaryKeyRelatedField(queryset=Crop.objects.all(), required=False, allow_null=True)
-    animal = serializers.PrimaryKeyRelatedField(queryset=Animal.objects.all(), required=False, allow_null=True)
+    field = serializers.PrimaryKeyRelatedField(
+        queryset=Field.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    crop = serializers.PrimaryKeyRelatedField(
+        queryset=Crop.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    animal = serializers.PrimaryKeyRelatedField(
+        queryset=Animal.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     created_by = serializers.ReadOnlyField(source="created_by.username")
 
     class Meta:
@@ -169,12 +140,6 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             self.fields["animal"].queryset = Animal.objects.filter(farm__owner=user)
 
     def validate(self, attrs):
-<<<<<<< HEAD
-        """
-        Rule: if field/crop/animal provided, they must belong to the same farm.
-        """
-=======
->>>>>>> master
         farm = attrs.get("farm") or getattr(self.instance, "farm", None)
         field = attrs.get("field") or getattr(self.instance, "field", None)
         crop = attrs.get("crop") or getattr(self.instance, "crop", None)
@@ -186,11 +151,6 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         if field and field.farm_id != farm.id:
             raise ValidationError({"field": "Field does not belong to the selected farm."})
         if crop and crop.field.farm_id != farm.id:
-<<<<<<< HEAD
-            raise ValidationError("Crop does not belong to the selected farm.")
-        if animal and animal.farm_id != farm.id:
-            raise ValidationError("Animal does not belong to the selected farm.")
-=======
             raise ValidationError({"crop": "Crop does not belong to the selected farm."})
         if animal and animal.farm_id != farm.id:
             raise ValidationError({"animal": "Animal does not belong to the selected farm."})
@@ -198,9 +158,6 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         return attrs
 
 
-# ==========================
-# YieldRecord (ML)
-# ==========================
 class YieldRecordSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
     field = serializers.PrimaryKeyRelatedField(
@@ -257,14 +214,10 @@ class YieldRecordSerializer(serializers.ModelSerializer):
 
         if field and field.farm_id != farm.id:
             raise ValidationError({"field": "Field does not belong to the selected farm."})
->>>>>>> master
 
         return attrs
 
 
-# ==========================
-# UserProfile
-# ==========================
 class UserProfileSerializer(serializers.ModelSerializer):
     user = serializers.ReadOnlyField(source="user.username")
 
@@ -274,9 +227,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "user"]
 
 
-# ==========================
-# Registration
-# ==========================
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, trim_whitespace=False)
     password2 = serializers.CharField(write_only=True, trim_whitespace=False)
@@ -312,9 +262,6 @@ class RegisterSerializer(serializers.ModelSerializer):
         return User.objects.create_user(password=password, **validated_data)
 
 
-# ==========================
-# Password Reset
-# ==========================
 class PasswordResetRequestSerializer(serializers.Serializer):
     email = serializers.EmailField()
 

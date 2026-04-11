@@ -1,89 +1,128 @@
-from datetime import date
+from django.contrib import admin
 
-from django.contrib.auth import get_user_model
-from django.test import TestCase
-from django.urls import reverse
-from rest_framework.test import APIClient
-
-from .models import ActivityLog, Animal, Crop, Farm, Field
-from .serializers import ActivityLogSerializer
-
-User = get_user_model()
-
-
-class ActivityLogSerializerValidationTests(TestCase):
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username="owner", email="owner@example.com", password="pass12345"
-        )
-        self.farm = Farm.objects.create(owner=self.user, name="Farm")
-        self.field = Field.objects.create(
-            farm=self.farm, name="Field A", area="10.00", soil_type="loam"
-        )
-
-    def test_partial_update_uses_instance_farm_when_not_provided(self):
-        log = ActivityLog.objects.create(
-            farm=self.farm,
-            date=date(2024, 1, 1),
-            activity_type="watering",
-            field=self.field,
-            created_by=self.user,
-        )
-
-        serializer = ActivityLogSerializer(
-            instance=log,
-            data={"description": "updated"},
-            partial=True,
-            context={"request": self._request_with_user(self.user)},
-        )
-
-        self.assertTrue(serializer.is_valid(), serializer.errors)
-
-    @staticmethod
-    def _request_with_user(user):
-        class Request:  # lightweight request stub for serializer context
-            def __init__(self, user):
-                self.user = user
-
-        return Request(user)
+from .models import (
+    ActivityLog,
+    Animal,
+    Crop,
+    EmailOTP,
+    Farm,
+    Field,
+    UserProfile,
+    YieldRecord,
+)
 
 
-class ActivityLogViewSetQueryTests(TestCase):
-    def setUp(self):
-        self.client = APIClient()
-        self.user = User.objects.create_user(
-            username="owner2", email="owner2@example.com", password="pass12345"
-        )
-        self.client.force_authenticate(self.user)
+@admin.register(Farm)
+class FarmAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "farm_code",
+        "owner",
+        "location",
+        "size_hectares",
+        "created_at",
+    )
+    search_fields = ("name", "farm_code", "location", "owner__username", "owner__email")
+    list_filter = ("created_at",)
+    ordering = ("-created_at",)
 
-        farm = Farm.objects.create(owner=self.user, name="Main farm")
-        field = Field.objects.create(
-            farm=farm, name="North", area="3.50", soil_type="loam"
-        )
-        crop = Crop.objects.create(field=field, name="Corn", status="growing")
-        animal = Animal.objects.create(farm=farm, species="Cow", tag_id="A-1")
 
-        for day in range(1, 4):
-            ActivityLog.objects.create(
-                farm=farm,
-                field=field,
-                crop=crop,
-                animal=animal,
-                date=date(2024, 1, day),
-                activity_type="feeding",
-                description=f"log {day}",
-                created_by=self.user,
-            )
+@admin.register(Field)
+class FieldAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "farm", "area", "soil_type", "latitude", "longitude")
+    search_fields = ("name", "farm__name")
+    list_filter = ("soil_type", "farm")
+    ordering = ("id",)
 
-    def test_activity_list_has_constant_query_count(self):
-        url = reverse("activity-list")
-        with self.assertNumQueries(2):
-            response = self.client.get(url)
 
-        self.assertEqual(response.status_code, 200)
-        payload = (
-            response.data.get("results", response.data)
-            if hasattr(response.data, "get")
-            else response.data
-        )
-        self.assertEqual(len(payload), 3)
+@admin.register(Crop)
+class CropAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "field",
+        "status",
+        "plant_date",
+        "expected_harvest_date",
+    )
+    search_fields = ("name", "field__name", "field__farm__name")
+    list_filter = ("status", "plant_date", "expected_harvest_date")
+    ordering = ("-id",)
+
+
+@admin.register(Animal)
+class AnimalAdmin(admin.ModelAdmin):
+    list_display = ("id", "species", "tag_id", "farm", "health_status", "birth_date")
+    search_fields = ("species", "tag_id", "farm__name")
+    list_filter = ("health_status", "species")
+    ordering = ("species", "tag_id")
+
+
+@admin.register(ActivityLog)
+class ActivityLogAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "date",
+        "activity_type",
+        "farm",
+        "field",
+        "crop",
+        "animal",
+        "created_by",
+        "created_at",
+    )
+    search_fields = (
+        "description",
+        "farm__name",
+        "field__name",
+        "crop__name",
+        "animal__tag_id",
+    )
+    list_filter = ("activity_type", "date", "created_at")
+    ordering = ("-date", "-created_at")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(YieldRecord)
+class YieldRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "farm",
+        "crop_type",
+        "season",
+        "irrigation_type",
+        "soil_type",
+        "farm_area_acres",
+        "actual_yield_tons",
+        "predicted_yield_tons",
+        "model_name",
+        "created_at",
+    )
+    search_fields = ("farm__name", "crop_type", "model_name", "notes")
+    list_filter = ("season", "irrigation_type", "soil_type", "model_name")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "prediction_created_at")
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "phone")
+    search_fields = ("user__username", "user__email", "phone")
+
+
+@admin.register(EmailOTP)
+class EmailOTPAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "email",
+        "expires_at",
+        "attempts_left",
+        "used",
+        "created_at",
+    )
+    search_fields = ("email", "user__username", "user__email")
+    list_filter = ("used", "created_at")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at",)

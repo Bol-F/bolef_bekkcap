@@ -48,7 +48,13 @@ def exchange_google_code(request):
         app = SocialApp.objects.get(provider="google")
     except SocialApp.DoesNotExist:
         return JsonResponse(
-            {"detail": "SocialApp(provider='google') not configured"}, status=500
+            {"detail": "SocialApp(provider='google') not configured"},
+            status=500,
+        )
+    except SocialApp.MultipleObjectsReturned:
+        return JsonResponse(
+            {"detail": "Multiple Google SocialApp entries found. Keep only one."},
+            status=500,
         )
 
     redirect_uri = getattr(
@@ -57,17 +63,23 @@ def exchange_google_code(request):
         "http://127.0.0.1:8000/auth/google/callback/",
     )
 
-    token_resp = requests.post(
-        "https://oauth2.googleapis.com/token",
-        data={
-            "code": code,
-            "client_id": app.client_id,
-            "client_secret": app.secret,
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
-        },
-        timeout=20,
-    )
+    try:
+        token_resp = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": app.client_id,
+                "client_secret": app.secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        return JsonResponse(
+            {"detail": "Failed to connect to Google token endpoint", "error": str(exc)},
+            status=502,
+        )
 
     try:
         token_data = token_resp.json()

@@ -1,20 +1,12 @@
-<<<<<<< HEAD
-# farm/views.py (overwrite)
-
-=======
->>>>>>> master
 import secrets
-from django.shortcuts import get_object_or_404
-from .ml_service import predict_yield_for_record
+
 from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.mail import send_mail
 from django.db import transaction
-<<<<<<< HEAD
-
-=======
->>>>>>> master
+from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
@@ -23,15 +15,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-<<<<<<< HEAD
-from allauth.account.models import EmailAddress
-
-from .email_otp_views import create_and_send_otp, _hash  # _hash used to compare codes
-from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile, EmailOTP
-=======
 from .email_otp_views import create_and_send_otp
+from .irrigation_service import (
+    calculate_watering_status,
+    get_field_weather_forecast,
+)
+from .ml_service import predict_yield_for_record
 from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile, YieldRecord
->>>>>>> master
 from .serializers import (
     ActivityLogSerializer,
     AnimalSerializer,
@@ -49,8 +39,6 @@ User = get_user_model()
 
 
 class IsOwnerRelatedPermission(permissions.BasePermission):
-<<<<<<< HEAD
-=======
     """
     Object-level access:
     - Farm: owner only
@@ -62,12 +50,12 @@ class IsOwnerRelatedPermission(permissions.BasePermission):
     - UserProfile: profile owner only
     """
 
->>>>>>> master
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated)
 
     def has_object_permission(self, request, view, obj):
         user = request.user
+
         if isinstance(obj, Farm):
             return obj.owner_id == user.id
         if isinstance(obj, Field):
@@ -77,15 +65,12 @@ class IsOwnerRelatedPermission(permissions.BasePermission):
         if isinstance(obj, Animal):
             return obj.farm.owner_id == user.id
         if isinstance(obj, ActivityLog):
-<<<<<<< HEAD
             return obj.farm.owner_id == user.id
-=======
-            return obj.farm.owner == user
         if isinstance(obj, YieldRecord):
-            return obj.farm.owner == user
->>>>>>> master
+            return obj.farm.owner_id == user.id
         if isinstance(obj, UserProfile):
             return obj.user_id == user.id
+
         return False
 
 
@@ -112,13 +97,10 @@ class FieldViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Field.objects.none()
-<<<<<<< HEAD
-        return Field.objects.filter(farm__owner=self.request.user).select_related("farm", "farm__owner")
-=======
         return Field.objects.filter(farm__owner=self.request.user).select_related(
-            "farm", "farm__owner"
+            "farm",
+            "farm__owner",
         )
->>>>>>> master
 
     def perform_create(self, serializer):
         farm = serializer.validated_data.get("farm")
@@ -141,7 +123,9 @@ class CropViewSet(viewsets.ModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return Crop.objects.none()
         return Crop.objects.filter(field__farm__owner=self.request.user).select_related(
-            "field", "field__farm", "field__farm__owner"
+            "field",
+            "field__farm",
+            "field__farm__owner",
         )
 
     def perform_create(self, serializer):
@@ -164,13 +148,10 @@ class AnimalViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Animal.objects.none()
-<<<<<<< HEAD
-        return Animal.objects.filter(farm__owner=self.request.user).select_related("farm", "farm__owner")
-=======
         return Animal.objects.filter(farm__owner=self.request.user).select_related(
-            "farm", "farm__owner"
+            "farm",
+            "farm__owner",
         )
->>>>>>> master
 
     def perform_create(self, serializer):
         farm = serializer.validated_data.get("farm")
@@ -193,16 +174,12 @@ class ActivityLogViewSet(viewsets.ModelViewSet):
         if getattr(self, "swagger_fake_view", False):
             return ActivityLog.objects.none()
         return ActivityLog.objects.filter(farm__owner=self.request.user).select_related(
-<<<<<<< HEAD
-            "farm", "farm__owner", "field", "crop", "animal", "created_by"
-=======
             "farm",
             "farm__owner",
             "field",
             "crop",
             "animal",
             "created_by",
->>>>>>> master
         )
 
     def perform_create(self, serializer):
@@ -235,11 +212,13 @@ class YieldRecordViewSet(viewsets.ModelViewSet):
         farm = serializer.validated_data.get("farm")
         field = serializer.validated_data.get("field")
 
-        if not farm or farm.owner != self.request.user:
+        if not farm or farm.owner_id != self.request.user.id:
             raise ValidationError({"farm": "You do not own this farm."})
 
         if field and field.farm_id != farm.id:
-            raise ValidationError({"field": "Field does not belong to the selected farm."})
+            raise ValidationError(
+                {"field": "Field does not belong to the selected farm."}
+            )
 
         serializer.save()
 
@@ -247,11 +226,13 @@ class YieldRecordViewSet(viewsets.ModelViewSet):
         farm = serializer.validated_data.get("farm", serializer.instance.farm)
         field = serializer.validated_data.get("field", serializer.instance.field)
 
-        if not farm or farm.owner != self.request.user:
+        if not farm or farm.owner_id != self.request.user.id:
             raise ValidationError({"farm": "You do not own this farm."})
 
         if field and field.farm_id != farm.id:
-            raise ValidationError({"field": "Field does not belong to the selected farm."})
+            raise ValidationError(
+                {"field": "Field does not belong to the selected farm."}
+            )
 
         serializer.save()
 
@@ -286,16 +267,22 @@ class RegisterView(APIView):
         user.is_active = False
         user.save(update_fields=["is_active"])
 
-        sent = create_and_send_otp(user, purpose=EmailOTP.Purpose.VERIFY_EMAIL)
+        sent = create_and_send_otp(user)
 
         if not sent:
             return Response(
-                {"detail": "Registered, but email sending failed. You can request a new code.", "email": user.email},
+                {
+                    "detail": "Registered, but email sending failed. You can request a new code.",
+                    "email": user.email,
+                },
                 status=status.HTTP_201_CREATED,
             )
 
         return Response(
-            {"detail": "Registered. Verification code sent to email.", "email": user.email},
+            {
+                "detail": "Registered. Verification code sent to email.",
+                "email": user.email,
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -306,13 +293,19 @@ class LogoutView(APIView):
     def post(self, request):
         refresh_token = request.data.get("refresh")
         if not refresh_token:
-            return Response({"detail": "Refresh token is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Refresh token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         try:
             token = RefreshToken(refresh_token)
             token.blacklist()
         except Exception:
-            return Response({"detail": "Invalid refresh token."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Invalid refresh token."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         return Response({"message": "Logged out"}, status=status.HTTP_205_RESET_CONTENT)
 
@@ -321,9 +314,6 @@ class LogoutView(APIView):
 @permission_classes([IsAuthenticated])
 def me(request):
     user = request.user
-<<<<<<< HEAD
-    verified = EmailAddress.objects.filter(user=user, email=user.email, verified=True).exists()
-=======
     email = (getattr(user, "email", "") or "").strip().lower()
 
     verified = False
@@ -334,7 +324,6 @@ def me(request):
             verified=True,
         ).exists()
 
->>>>>>> master
     return Response(
         {
             "id": user.id,
@@ -347,14 +336,6 @@ def me(request):
 
 
 class PasswordResetRequestView(APIView):
-<<<<<<< HEAD
-    """
-    POST: {"email": "..."}
-    Sends RESET_PASSWORD OTP to email (if user exists).
-    Always returns 200 to avoid user enumeration.
-    """
-=======
->>>>>>> master
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -362,12 +343,6 @@ class PasswordResetRequestView(APIView):
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
 
-<<<<<<< HEAD
-        user = User.objects.filter(email__iexact=email).order_by("-id").first()
-        if user:
-            # send reset OTP (separate from verify OTP)
-            create_and_send_otp(user, purpose=EmailOTP.Purpose.RESET_PASSWORD)
-=======
         code = f"{secrets.randbelow(10**6):06d}"
         cache_key = f"pwdreset:{email}"
         cache.set(cache_key, code, timeout=10 * 60)
@@ -392,7 +367,6 @@ class PasswordResetRequestView(APIView):
                 },
                 status=status.HTTP_200_OK,
             )
->>>>>>> master
 
         return Response(
             {"detail": "If this email exists, a reset code was sent."},
@@ -401,13 +375,6 @@ class PasswordResetRequestView(APIView):
 
 
 class PasswordResetConfirmView(APIView):
-<<<<<<< HEAD
-    """
-    POST: {"email":"...", "code":"123456", "new_password":"...", "new_password2":"..."}
-    Uses EmailOTP(purpose=RESET_PASSWORD)
-    """
-=======
->>>>>>> master
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -418,60 +385,32 @@ class PasswordResetConfirmView(APIView):
         code = serializer.validated_data["code"]
         new_password = serializer.validated_data["new_password"]
 
-        user = User.objects.filter(email__iexact=email).order_by("-id").first()
-        if not user:
-<<<<<<< HEAD
-            return Response({"detail": "Invalid or expired code."}, status=status.HTTP_400_BAD_REQUEST)
+        cache_key = f"pwdreset:{email}"
+        saved_code = cache.get(cache_key)
 
-        otp = (
-            EmailOTP.objects.filter(
-                user=user,
-                email=email,
-                purpose=EmailOTP.Purpose.RESET_PASSWORD,
-                used=False,
-=======
+        if not saved_code or saved_code != code:
             return Response(
                 {"detail": "Invalid or expired code."},
                 status=status.HTTP_400_BAD_REQUEST,
->>>>>>> master
             )
-            .order_by("-created_at")
-            .first()
-        )
-        if not otp:
-            return Response({"detail": "Invalid or expired code."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if otp.is_expired():
-            otp.used = True
-            otp.save(update_fields=["used"])
-            return Response({"detail": "Code expired. Send a new code."}, status=status.HTTP_400_BAD_REQUEST)
-
-        if otp.attempts_left <= 0:
-            otp.used = True
-            otp.save(update_fields=["used"])
-            return Response({"detail": "Too many attempts. Send a new code."}, status=status.HTTP_400_BAD_REQUEST)
-
-        if _hash(code) != otp.code_hash:
-            otp.attempts_left -= 1
-            otp.save(update_fields=["attempts_left"])
-            return Response({"detail": "Invalid code"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # success
-        otp.used = True
-        otp.save(update_fields=["used"])
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            return Response(
+                {"detail": "Invalid or expired code."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         user.set_password(new_password)
         user.save(update_fields=["password"])
 
-<<<<<<< HEAD
-        return Response({"detail": "Password updated successfully."}, status=status.HTTP_200_OK)
-=======
         cache.delete(cache_key)
 
         return Response(
             {"detail": "Password updated successfully."},
             status=status.HTTP_200_OK,
         )
+
 
 class PredictYieldView(APIView):
     permission_classes = [IsAuthenticated]
@@ -492,4 +431,45 @@ class PredictYieldView(APIView):
             },
             status=status.HTTP_200_OK,
         )
->>>>>>> master
+
+
+class FieldWateringStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        field = get_object_or_404(
+            Field.objects.select_related("farm"),
+            pk=pk,
+            farm__owner=request.user,
+        )
+
+        if field.latitude is None or field.longitude is None:
+            return Response(
+                {"detail": "Field location is not set."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            weather_data = get_field_weather_forecast(
+                latitude=field.latitude,
+                longitude=field.longitude,
+            )
+            result = calculate_watering_status(weather_data)
+        except Exception as exc:
+            return Response(
+                {"detail": f"Could not get watering status: {exc}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(
+            {
+                "field_id": field.id,
+                "field_name": field.name,
+                "latitude": field.latitude,
+                "longitude": field.longitude,
+                "watering_status": result.get("status"),
+                "reason": result.get("reason"),
+                "recommended_window": result.get("recommended_window"),
+            },
+            status=status.HTTP_200_OK,
+        )

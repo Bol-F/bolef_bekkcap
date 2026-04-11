@@ -73,12 +73,8 @@ INSTALLED_APPS = [
     "dj_rest_auth.registration",
     # Local
     "farm",
-<<<<<<< HEAD
     'soil_monitoring',
     "weather",
-=======
-    "soil_monitoring",
->>>>>>> master
 ]
 
 # =============================================================================
