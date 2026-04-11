@@ -1,5 +1,4 @@
 from rest_framework import serializers
-from rest_framework.exceptions import ValidationError
 
 from farm.models import Field, YieldRecord
 from .models import SoilMeasurement
@@ -34,19 +33,37 @@ class SoilMeasurementSerializer(serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
         request = self.context.get("request")
         if request and request.user.is_authenticated:
             user = request.user
             self.fields["field"].queryset = Field.objects.filter(farm__owner=user)
-            self.fields["yield_record"].queryset = YieldRecord.objects.filter(farm__owner=user)
+            self.fields["yield_record"].queryset = YieldRecord.objects.filter(
+                farm__owner=user
+            )
 
     def validate(self, attrs):
         field = attrs.get("field") or getattr(self.instance, "field", None)
-        yield_record = attrs.get("yield_record") or getattr(self.instance, "yield_record", None)
+        yield_record = attrs.get("yield_record") or getattr(
+            self.instance, "yield_record", None
+        )
 
-        if yield_record and field and yield_record.field and yield_record.field_id != field.id:
-            raise ValidationError(
-                {"yield_record": "Yield record does not belong to the selected field."}
-            )
+        if not field:
+            raise serializers.ValidationError({"field": "This field is required."})
+
+        if yield_record:
+            if yield_record.farm_id != field.farm_id:
+                raise serializers.ValidationError(
+                    {
+                        "yield_record": "Yield record does not belong to the same farm as the selected field."
+                    }
+                )
+
+            if yield_record.field_id and yield_record.field_id != field.id:
+                raise serializers.ValidationError(
+                    {
+                        "yield_record": "Yield record does not belong to the selected field."
+                    }
+                )
 
         return attrs

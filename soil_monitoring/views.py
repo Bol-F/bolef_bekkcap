@@ -1,4 +1,4 @@
-from rest_framework import permissions, viewsets
+from rest_framework import viewsets
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 
@@ -22,48 +22,46 @@ class SoilMeasurementViewSet(viewsets.ModelViewSet):
                 "field__farm__owner",
                 "yield_record",
                 "yield_record__farm",
+                "yield_record__field",
             )
             .order_by("-sample_date", "-created_at")
         )
 
-    def perform_create(self, serializer):
-        field = serializer.validated_data.get("field")
-        yield_record = serializer.validated_data.get("yield_record")
+    def _validate_ownership_and_relations(self, serializer):
+        field = serializer.validated_data.get(
+            "field", getattr(serializer.instance, "field", None)
+        )
+        yield_record = serializer.validated_data.get(
+            "yield_record", getattr(serializer.instance, "yield_record", None)
+        )
 
-        if not field or field.farm.owner != self.request.user:
+        if not field or field.farm.owner_id != self.request.user.id:
             raise ValidationError({"field": "You do not own this field/farm."})
 
         if yield_record:
-            if yield_record.farm.owner != self.request.user:
+            if yield_record.farm.owner_id != self.request.user.id:
                 raise ValidationError(
                     {"yield_record": "You do not own this yield record."}
                 )
 
-            if yield_record.field and yield_record.field_id != field.id:
+            if yield_record.farm_id != field.farm_id:
                 raise ValidationError(
-                    {"yield_record": "Yield record does not belong to the selected field."}
+                    {
+                        "yield_record": "Yield record does not belong to the same farm as the selected field."
+                    }
                 )
 
+            if yield_record.field_id and yield_record.field_id != field.id:
+                raise ValidationError(
+                    {
+                        "yield_record": "Yield record does not belong to the selected field."
+                    }
+                )
+
+    def perform_create(self, serializer):
+        self._validate_ownership_and_relations(serializer)
         serializer.save()
 
     def perform_update(self, serializer):
-        field = serializer.validated_data.get("field", serializer.instance.field)
-        yield_record = serializer.validated_data.get(
-            "yield_record", serializer.instance.yield_record
-        )
-
-        if not field or field.farm.owner != self.request.user:
-            raise ValidationError({"field": "You do not own this field/farm."})
-
-        if yield_record:
-            if yield_record.farm.owner != self.request.user:
-                raise ValidationError(
-                    {"yield_record": "You do not own this yield record."}
-                )
-
-            if yield_record.field and yield_record.field_id != field.id:
-                raise ValidationError(
-                    {"yield_record": "Yield record does not belong to the selected field."}
-                )
-
+        self._validate_ownership_and_relations(serializer)
         serializer.save()

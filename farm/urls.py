@@ -25,6 +25,8 @@ from .views import (
     me,
 )
 
+app_name = "farm"
+
 router = DefaultRouter()
 router.register(r"farms", FarmViewSet, basename="farm")
 router.register(r"fields", FieldViewSet, basename="field")
@@ -35,25 +37,37 @@ router.register(r"yield-records", YieldRecordViewSet, basename="yield-record")
 router.register(r"profiles", UserProfileViewSet, basename="profile")
 
 urlpatterns = [
+    # profile / current user
     path("profiles/me/", me, name="profiles-me"),
-
+    # auth
     path("auth/register/", RegisterView.as_view(), name="auth-register"),
     path("auth/login/", TokenObtainPairView.as_view(), name="auth-login"),
     path("auth/refresh/", TokenRefreshView.as_view(), name="auth-refresh"),
     path("auth/verify/", TokenVerifyView.as_view(), name="auth-verify"),
     path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
     path("auth/set-password/", set_password, name="auth-set-password"),
-
+    # google auth
     path("auth/google/", GoogleLogin.as_view(), name="google-login"),
     path(
         "auth/google/exchange-code/",
         exchange_google_code,
         name="exchange-google-code",
     ),
-
-    path("auth/email/send-code/", send_email_code, name="send_email_code"),
-    path("auth/email/verify-code/", verify_email_code, name="verify_email_code"),
-
+    # email otp
+    path("auth/email/send-code/", send_email_code, name="send-email-code"),
+    path("auth/email/verify-code/", verify_email_code, name="verify-email-code"),
+    # password reset
+    path(
+        "auth/password-reset/",
+        PasswordResetRequestView.as_view(),
+        name="password-reset-request",
+    ),
+    path(
+        "auth/password-reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="password-reset-confirm",
+    ),
+    # custom domain endpoints
     path(
         "yield-records/<int:pk>/predict/",
         PredictYieldView.as_view(),
@@ -64,17 +78,6 @@ urlpatterns = [
         FieldWateringStatusView.as_view(),
         name="field-watering-status",
     ),
-
+    # CRUD routers
     path("", include(router.urls)),
-
-    path(
-        "auth/password-reset/",
-        PasswordResetRequestView.as_view(),
-        name="password_reset_request",
-    ),
-    path(
-        "auth/password-reset/confirm/",
-        PasswordResetConfirmView.as_view(),
-        name="password_reset_confirm",
-    ),
 ]

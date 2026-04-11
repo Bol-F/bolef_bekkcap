@@ -18,9 +18,9 @@ class SoilAnalysisService:
     """
 
     # Порог “дождь скоро” (можешь менять)
-    RAIN_MM_NEXT_HOURS = 3.0       # мм осадков за окно
-    RAIN_PROB_MAX = 70.0           # макс вероятность осадков (%)
-    RAIN_WINDOW_HOURS = 12         # окно прогнозирования
+    RAIN_MM_NEXT_HOURS = 3.0  # мм осадков за окно
+    RAIN_PROB_MAX = 70.0  # макс вероятность осадков (%)
+    RAIN_WINDOW_HOURS = 12  # окно прогнозирования
 
     @classmethod
     def analyze_reading(cls, reading: SensorReading) -> List[Recommendation]:
@@ -62,7 +62,10 @@ class SoilAnalysisService:
         }
         or None if no coords / provider error.
         """
-        if getattr(field, "latitude", None) is None or getattr(field, "longitude", None) is None:
+        if (
+            getattr(field, "latitude", None) is None
+            or getattr(field, "longitude", None) is None
+        ):
             return None
 
         try:
@@ -76,7 +79,9 @@ class SoilAnalysisService:
         lon = float(field.longitude)
 
         try:
-            data, _from_cache = fetch_open_meteo_forecast(lat=lat, lon=lon, days=2, timezone="auto")
+            data, _from_cache = fetch_open_meteo_forecast(
+                lat=lat, lon=lon, days=2, timezone="auto"
+            )
         except Exception as e:
             logger.warning("Weather fetch failed: %s", e)
             return None
@@ -119,7 +124,9 @@ class SoilAnalysisService:
                 except Exception:
                     pass
 
-        will_rain_soon = (rain_sum >= cls.RAIN_MM_NEXT_HOURS) or (max_prob >= cls.RAIN_PROB_MAX)
+        will_rain_soon = (rain_sum >= cls.RAIN_MM_NEXT_HOURS) or (
+            max_prob >= cls.RAIN_PROB_MAX
+        )
 
         return {
             "will_rain_soon": bool(will_rain_soon),
@@ -133,10 +140,14 @@ class SoilAnalysisService:
     # analyzers
     # -------------------------
     @classmethod
-    def _analyze_moisture(cls, reading: SensorReading, profile: FieldSoilProfile) -> List[Recommendation]:
+    def _analyze_moisture(
+        cls, reading: SensorReading, profile: FieldSoilProfile
+    ) -> List[Recommendation]:
         recommendations: List[Recommendation] = []
 
-        irrigation_threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (1 - profile.mad)
+        irrigation_threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (
+            1 - profile.mad
+        )
         weather_ctx = cls._get_weather_context(reading.field)
 
         # 1) CRITICAL dry: ignore weather
@@ -166,7 +177,10 @@ class SoilAnalysisService:
 
         # 2) Need watering (below MAD threshold) — but check rain soon
         if reading.moisture_vwc < irrigation_threshold:
-            depletion_pct = ((profile.fc_vwc - reading.moisture_vwc) / (profile.fc_vwc - profile.pwp_vwc)) * 100
+            depletion_pct = (
+                (profile.fc_vwc - reading.moisture_vwc)
+                / (profile.fc_vwc - profile.pwp_vwc)
+            ) * 100
 
             if weather_ctx and weather_ctx.get("will_rain_soon"):
                 # downgrade / suggest delay
@@ -254,12 +268,18 @@ class SoilAnalysisService:
         return recommendations
 
     @classmethod
-    def _analyze_ph(cls, reading: SensorReading, profile: FieldSoilProfile) -> List[Recommendation]:
+    def _analyze_ph(
+        cls, reading: SensorReading, profile: FieldSoilProfile
+    ) -> List[Recommendation]:
         recommendations: List[Recommendation] = []
 
         if reading.ph < profile.ph_min:
             deviation = profile.ph_min - reading.ph
-            severity = Recommendation.Severity.HIGH if deviation > 1.0 else Recommendation.Severity.MED
+            severity = (
+                Recommendation.Severity.HIGH
+                if deviation > 1.0
+                else Recommendation.Severity.MED
+            )
 
             recommendations.append(
                 cls._create_recommendation(
@@ -284,7 +304,11 @@ class SoilAnalysisService:
 
         elif reading.ph > profile.ph_max:
             deviation = reading.ph - profile.ph_max
-            severity = Recommendation.Severity.HIGH if deviation > 1.0 else Recommendation.Severity.MED
+            severity = (
+                Recommendation.Severity.HIGH
+                if deviation > 1.0
+                else Recommendation.Severity.MED
+            )
 
             recommendations.append(
                 cls._create_recommendation(
@@ -302,7 +326,11 @@ class SoilAnalysisService:
                         "ph_max": profile.ph_max,
                         "deviation": deviation,
                         "reading_id": reading.id,
-                        "recommendations": ["Элементарная сера", "Торф", "Органические мульчи"],
+                        "recommendations": [
+                            "Элементарная сера",
+                            "Торф",
+                            "Органические мульчи",
+                        ],
                     },
                 )
             )
@@ -310,11 +338,15 @@ class SoilAnalysisService:
         return recommendations
 
     @classmethod
-    def _analyze_ec(cls, reading: SensorReading, profile: FieldSoilProfile) -> List[Recommendation]:
+    def _analyze_ec(
+        cls, reading: SensorReading, profile: FieldSoilProfile
+    ) -> List[Recommendation]:
         recommendations: List[Recommendation] = []
 
         if reading.ec_ds_m > profile.ec_max_ds_m:
-            excess_pct = ((reading.ec_ds_m - profile.ec_max_ds_m) / profile.ec_max_ds_m) * 100
+            excess_pct = (
+                (reading.ec_ds_m - profile.ec_max_ds_m) / profile.ec_max_ds_m
+            ) * 100
 
             if reading.ec_ds_m > profile.ec_max_ds_m * 2:
                 severity = Recommendation.Severity.HIGH
@@ -342,7 +374,12 @@ class SoilAnalysisService:
                         "excess_pct": excess_pct,
                         "salinity_level": level,
                         "reading_id": reading.id,
-                        "recommendations": ["Промывка", "Дренаж", "Солеустойчивые культуры", "Гипс (CaSO₄)"],
+                        "recommendations": [
+                            "Промывка",
+                            "Дренаж",
+                            "Солеустойчивые культуры",
+                            "Гипс (CaSO₄)",
+                        ],
                     },
                 )
             )
@@ -350,12 +387,18 @@ class SoilAnalysisService:
         return recommendations
 
     @classmethod
-    def _analyze_temperature(cls, reading: SensorReading, profile: FieldSoilProfile) -> List[Recommendation]:
+    def _analyze_temperature(
+        cls, reading: SensorReading, profile: FieldSoilProfile
+    ) -> List[Recommendation]:
         recommendations: List[Recommendation] = []
 
         if reading.soil_temp_c < profile.temp_min_c:
             deviation = profile.temp_min_c - reading.soil_temp_c
-            severity = Recommendation.Severity.HIGH if deviation > 5 else Recommendation.Severity.LOW
+            severity = (
+                Recommendation.Severity.HIGH
+                if deviation > 5
+                else Recommendation.Severity.LOW
+            )
 
             recommendations.append(
                 cls._create_recommendation(
@@ -378,7 +421,11 @@ class SoilAnalysisService:
 
         elif reading.soil_temp_c > profile.temp_max_c:
             deviation = reading.soil_temp_c - profile.temp_max_c
-            severity = Recommendation.Severity.HIGH if deviation > 5 else Recommendation.Severity.MED
+            severity = (
+                Recommendation.Severity.HIGH
+                if deviation > 5
+                else Recommendation.Severity.MED
+            )
 
             recommendations.append(
                 cls._create_recommendation(
@@ -435,7 +482,9 @@ class SoilAnalysisService:
 
         cls._notify_farm_owner(recommendation)
 
-        logger.info("Created recommendation %s/%s for field %s", category, severity, field.id)
+        logger.info(
+            "Created recommendation %s/%s for field %s", category, severity, field.id
+        )
         return recommendation
 
     @classmethod
@@ -443,7 +492,9 @@ class SoilAnalysisService:
         try:
             owner = recommendation.field.farm.owner
         except Exception:
-            logger.warning("Cannot resolve owner for recommendation %s", recommendation.id)
+            logger.warning(
+                "Cannot resolve owner for recommendation %s", recommendation.id
+            )
             return
 
         Notification.objects.create(
@@ -512,9 +563,13 @@ class SoilAnalysisService:
         else:
             health_status = "poor"
 
-        active_recs = Recommendation.objects.filter(field_id=field_id, is_active=True).count()
+        active_recs = Recommendation.objects.filter(
+            field_id=field_id, is_active=True
+        ).count()
 
-        threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (1 - profile.mad)
+        threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (
+            1 - profile.mad
+        )
         needs_irrigation = (
             latest_reading is not None
             and latest_reading.moisture_vwc is not None
@@ -537,11 +592,15 @@ class SoilAnalysisService:
         }
 
     @classmethod
-    def _evaluate_moisture_health(cls, moisture_vwc: Optional[float], profile: FieldSoilProfile) -> Dict:
+    def _evaluate_moisture_health(
+        cls, moisture_vwc: Optional[float], profile: FieldSoilProfile
+    ) -> Dict:
         if moisture_vwc is None:
             return {"score": 0, "status": "unknown", "message": "No data"}
 
-        threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (1 - profile.mad)
+        threshold = profile.pwp_vwc + (profile.fc_vwc - profile.pwp_vwc) * (
+            1 - profile.mad
+        )
 
         if moisture_vwc < profile.pwp_vwc:
             return {"score": 10, "status": "critical", "message": "Критическая сухость"}
@@ -554,7 +613,9 @@ class SoilAnalysisService:
         return {"score": 80, "status": "good", "message": "Хорошо"}
 
     @classmethod
-    def _evaluate_ph_health(cls, ph: Optional[float], profile: FieldSoilProfile) -> Dict:
+    def _evaluate_ph_health(
+        cls, ph: Optional[float], profile: FieldSoilProfile
+    ) -> Dict:
         if ph is None:
             return {"score": 0, "status": "unknown", "message": "No data"}
 
@@ -565,7 +626,9 @@ class SoilAnalysisService:
         return {"score": 60, "status": "fair", "message": "Допустимо"}
 
     @classmethod
-    def _evaluate_ec_health(cls, ec: Optional[float], profile: FieldSoilProfile) -> Dict:
+    def _evaluate_ec_health(
+        cls, ec: Optional[float], profile: FieldSoilProfile
+    ) -> Dict:
         if ec is None:
             return {"score": 0, "status": "unknown", "message": "No data"}
 
@@ -576,7 +639,9 @@ class SoilAnalysisService:
         return {"score": 30, "status": "saline", "message": "Засолена"}
 
     @classmethod
-    def _evaluate_temp_health(cls, temp: Optional[float], profile: FieldSoilProfile) -> Dict:
+    def _evaluate_temp_health(
+        cls, temp: Optional[float], profile: FieldSoilProfile
+    ) -> Dict:
         if temp is None:
             return {"score": 0, "status": "unknown", "message": "No data"}
 

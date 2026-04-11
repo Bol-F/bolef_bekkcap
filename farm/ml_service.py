@@ -65,7 +65,9 @@ def load_model_and_metadata():
     return model, metadata
 
 
-def build_features_from_yield_record(record: YieldRecord, feature_columns: list[str]) -> pd.DataFrame:
+def build_features_from_yield_record(
+    record: YieldRecord, feature_columns: list[str]
+) -> pd.DataFrame:
     data = {
         "crop_type": str(record.crop_type).strip(),
         "farm_area_acres": float(record.farm_area_acres),

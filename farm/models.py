@@ -1,4 +1,9 @@
+from __future__ import annotations
+
+import math
+
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
@@ -74,13 +79,15 @@ class Field(models.Model):
         help_text="Field area in hectares",
     )
     soil_type = models.CharField(max_length=20, choices=SOIL_CHOICES, default="loamy")
+
+    # Simple map support (legacy-compatible)
     latitude = models.DecimalField(
         max_digits=9,
         decimal_places=6,
         null=True,
         blank=True,
         validators=[MinValueValidator(-90), MaxValueValidator(90)],
-        help_text="Field latitude",
+        help_text="Field center latitude",
     )
     longitude = models.DecimalField(
         max_digits=9,
@@ -88,8 +95,19 @@ class Field(models.Model):
         null=True,
         blank=True,
         validators=[MinValueValidator(-180), MaxValueValidator(180)],
-        help_text="Field longitude",
+        help_text="Field center longitude",
     )
+
+    # Better NDVI / map support
+    polygon = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Optional polygon as [[lon, lat], [lon, lat], ...]. Auto-closed on save.",
+    )
+    bbox_min_lon = models.FloatField(null=True, blank=True, editable=False)
+    bbox_max_lon = models.FloatField(null=True, blank=True, editable=False)
+    bbox_min_lat = models.FloatField(null=True, blank=True, editable=False)
+    bbox_max_lat = models.FloatField(null=True, blank=True, editable=False)
 
     class Meta:
         ordering = ["id"]
@@ -99,10 +117,104 @@ class Field(models.Model):
                 name="uniq_field_name_per_farm",
             )
         ]
-        indexes = [models.Index(fields=["farm"])]
+        indexes = [
+            models.Index(fields=["farm"]),
+            models.Index(fields=["latitude", "longitude"]),
+        ]
 
     def __str__(self):
         return f"{self.name} - {self.farm.name}"
+
+    def clean(self):
+        super().clean()
+
+        if (self.latitude is None) ^ (self.longitude is None):
+            raise ValidationError(
+                "Set both latitude and longitude, or leave both empty."
+            )
+
+        if self.polygon:
+            if not isinstance(self.polygon, list) or len(self.polygon) < 4:
+                raise ValidationError("Polygon must have at least 4 coordinate pairs.")
+
+            for pt in self.polygon:
+                if not isinstance(pt, list) or len(pt) != 2:
+                    raise ValidationError(
+                        f"Each polygon point must be [lon, lat]. Got: {pt}"
+                    )
+
+                lon, lat = pt
+                if not (-180 <= lon <= 180):
+                    raise ValidationError(f"Polygon longitude out of range: {lon}")
+                if not (-90 <= lat <= 90):
+                    raise ValidationError(f"Polygon latitude out of range: {lat}")
+
+    def save(self, *args, **kwargs):
+        self._normalize_polygon()
+        if self.polygon:
+            self._sync_spatial_fields_from_polygon()
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def _normalize_polygon(self):
+        if not self.polygon or not isinstance(self.polygon, list):
+            return
+
+        if self.polygon[0] != self.polygon[-1]:
+            self.polygon.append(self.polygon[0])
+
+    def _unique_polygon_points(self):
+        if not self.polygon:
+            return []
+        if len(self.polygon) >= 2 and self.polygon[0] == self.polygon[-1]:
+            return self.polygon[:-1]
+        return self.polygon
+
+    def _sync_spatial_fields_from_polygon(self):
+        points = self._unique_polygon_points()
+        if not points:
+            return
+
+        lons = [p[0] for p in points]
+        lats = [p[1] for p in points]
+
+        center_lon = sum(lons) / len(lons)
+        center_lat = sum(lats) / len(lats)
+
+        self.longitude = round(center_lon, 6)
+        self.latitude = round(center_lat, 6)
+
+        self.bbox_min_lon = min(lons)
+        self.bbox_max_lon = max(lons)
+        self.bbox_min_lat = min(lats)
+        self.bbox_max_lat = max(lats)
+
+    @property
+    def has_location(self) -> bool:
+        return bool(
+            (self.latitude is not None and self.longitude is not None) or self.polygon
+        )
+
+    @property
+    def polygon_area_approx_ha(self) -> float | None:
+        points = self._unique_polygon_points()
+        if len(points) < 3:
+            return None
+
+        area = 0.0
+        n = len(points)
+        for i in range(n):
+            j = (i + 1) % n
+            area += points[i][0] * points[j][1]
+            area -= points[j][0] * points[i][1]
+        area = abs(area) / 2.0
+
+        center_lat = float(self.latitude) if self.latitude is not None else 0.0
+        lat_rad = math.radians(center_lat)
+        meters_per_deg_lon = 111320 * math.cos(lat_rad)
+        meters_per_deg_lat = 110540
+        area_m2 = area * meters_per_deg_lon * meters_per_deg_lat
+        return round(area_m2 / 10_000, 2)
 
 
 class Crop(models.Model):
@@ -211,6 +323,28 @@ class ActivityLog(models.Model):
     def __str__(self):
         return f"{self.activity_type} on {self.date} ({self.farm.name})"
 
+    def clean(self):
+        super().clean()
+
+        if self.field and self.field.farm_id != self.farm_id:
+            raise ValidationError(
+                {"field": "Selected field does not belong to the selected farm."}
+            )
+
+        if self.crop and self.crop.field.farm_id != self.farm_id:
+            raise ValidationError(
+                {"crop": "Selected crop does not belong to the selected farm."}
+            )
+
+        if self.animal and self.animal.farm_id != self.farm_id:
+            raise ValidationError(
+                {"animal": "Selected animal does not belong to the selected farm."}
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
 
 class YieldRecord(models.Model):
     farm = models.ForeignKey(
@@ -298,6 +432,17 @@ class YieldRecord(models.Model):
 
     def __str__(self):
         return f"{self.farm.name} - {self.crop_type} - {self.season}"
+
+    def clean(self):
+        super().clean()
+        if self.field and self.field.farm_id != self.farm_id:
+            raise ValidationError(
+                {"field": "Selected field does not belong to the selected farm."}
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
 
 
 class UserProfile(models.Model):

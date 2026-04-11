@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 
@@ -78,9 +79,35 @@ class SoilMeasurement(models.Model):
     class Meta:
         ordering = ["-sample_date", "-created_at"]
         indexes = [
-            models.Index(fields=["field", "-sample_date"]),
+            models.Index(fields=["field", "sample_date"]),
             models.Index(fields=["soil_type"]),
+            models.Index(fields=["sample_date"]),
         ]
 
     def __str__(self):
         return f"SoilMeasurement for {self.field.name} on {self.sample_date}"
+
+    def clean(self):
+        super().clean()
+
+        if self.yield_record:
+            if self.yield_record.farm_id != self.field.farm_id:
+                raise ValidationError(
+                    {
+                        "yield_record": "Yield record does not belong to the same farm as the selected field."
+                    }
+                )
+
+            if (
+                self.yield_record.field_id
+                and self.yield_record.field_id != self.field_id
+            ):
+                raise ValidationError(
+                    {
+                        "yield_record": "Yield record does not belong to the selected field."
+                    }
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)

@@ -20,6 +20,8 @@ class FarmSerializer(serializers.ModelSerializer):
 
 class FieldSerializer(serializers.ModelSerializer):
     farm = serializers.PrimaryKeyRelatedField(queryset=Farm.objects.all())
+    has_location = serializers.BooleanField(read_only=True)
+    polygon_area_approx_ha = serializers.FloatField(read_only=True)
 
     class Meta:
         model = Field
@@ -31,14 +33,79 @@ class FieldSerializer(serializers.ModelSerializer):
             "soil_type",
             "latitude",
             "longitude",
+            "polygon",
+            "bbox_min_lon",
+            "bbox_max_lon",
+            "bbox_min_lat",
+            "bbox_max_lat",
+            "has_location",
+            "polygon_area_approx_ha",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = [
+            "id",
+            "bbox_min_lon",
+            "bbox_max_lon",
+            "bbox_min_lat",
+            "bbox_max_lat",
+            "has_location",
+            "polygon_area_approx_ha",
+        ]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         request = self.context.get("request")
         if request and request.user.is_authenticated:
             self.fields["farm"].queryset = Farm.objects.filter(owner=request.user)
+
+    def validate_polygon(self, value):
+        if value in (None, "", []):
+            return None
+
+        if not isinstance(value, list) or len(value) < 4:
+            raise serializers.ValidationError(
+                "Polygon must have at least 4 coordinate pairs."
+            )
+
+        normalized = []
+        for pt in value:
+            if not isinstance(pt, list) or len(pt) != 2:
+                raise serializers.ValidationError(
+                    f"Each polygon point must be [lon, lat]. Got: {pt}"
+                )
+
+            lon, lat = pt
+            if not (-180 <= lon <= 180):
+                raise serializers.ValidationError(f"Longitude out of range: {lon}")
+            if not (-90 <= lat <= 90):
+                raise serializers.ValidationError(f"Latitude out of range: {lat}")
+
+            normalized.append([float(lon), float(lat)])
+
+        if normalized[0] != normalized[-1]:
+            normalized.append(normalized[0])
+
+        return normalized
+
+    def validate(self, attrs):
+        latitude = attrs.get("latitude", getattr(self.instance, "latitude", None))
+        longitude = attrs.get("longitude", getattr(self.instance, "longitude", None))
+        polygon = attrs.get("polygon", getattr(self.instance, "polygon", None))
+
+        if (latitude is None) ^ (longitude is None):
+            raise ValidationError(
+                "Set both latitude and longitude, or leave both empty."
+            )
+
+        if not polygon and latitude is None and longitude is None:
+            raise ValidationError(
+                {
+                    "polygon": "Provide either a polygon or latitude/longitude.",
+                    "latitude": "Provide either a polygon or latitude/longitude.",
+                    "longitude": "Provide either a polygon or latitude/longitude.",
+                }
+            )
+
+        return attrs
 
 
 class CropSerializer(serializers.ModelSerializer):
@@ -149,11 +216,17 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             raise ValidationError({"farm": "This field is required."})
 
         if field and field.farm_id != farm.id:
-            raise ValidationError({"field": "Field does not belong to the selected farm."})
+            raise ValidationError(
+                {"field": "Field does not belong to the selected farm."}
+            )
         if crop and crop.field.farm_id != farm.id:
-            raise ValidationError({"crop": "Crop does not belong to the selected farm."})
+            raise ValidationError(
+                {"crop": "Crop does not belong to the selected farm."}
+            )
         if animal and animal.farm_id != farm.id:
-            raise ValidationError({"animal": "Animal does not belong to the selected farm."})
+            raise ValidationError(
+                {"animal": "Animal does not belong to the selected farm."}
+            )
 
         return attrs
 
@@ -213,7 +286,9 @@ class YieldRecordSerializer(serializers.ModelSerializer):
             raise ValidationError({"farm": "This field is required."})
 
         if field and field.farm_id != farm.id:
-            raise ValidationError({"field": "Field does not belong to the selected farm."})
+            raise ValidationError(
+                {"field": "Field does not belong to the selected farm."}
+            )
 
         return attrs
 

@@ -207,7 +207,6 @@ print("\nSample predictions:")
 print(results.head(10))
 
 
-
 # =========================
 # 14. Save the trained model
 # =========================

@@ -6,13 +6,12 @@ django-allauth==65.13.1
 django-cors-headers==4.9.0
 python-dotenv==1.2.1
 requests==2.32.5
-drf-yasg==1.21.11
+drf-spectacular
 whitenoise==6.11.0
 gunicorn==23.0.0
 Pillow==12.0.0
-psycopg-binary==3.3.2
 psycopg[binary]>=3.1.8
 cryptography==46.0.3
 pandas==3.0.2
-catboots==1.2.10
+catboost==1.2.10
 scikit-learn==1.8.0

@@ -1,4 +1,5 @@
 import json
+from json import JSONDecodeError
 
 import requests
 from allauth.socialaccount.models import SocialApp
@@ -37,10 +38,10 @@ class GoogleLogin(SocialLoginView):
 def exchange_google_code(request):
     try:
         data = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
+    except JSONDecodeError:
         return JsonResponse({"detail": "Invalid JSON"}, status=400)
 
-    code = data.get("code")
+    code = (data.get("code") or "").strip()
     if not code:
         return JsonResponse({"detail": "code is required"}, status=400)
 
@@ -83,7 +84,7 @@ def exchange_google_code(request):
 
     try:
         token_data = token_resp.json()
-    except Exception:
+    except ValueError:
         return JsonResponse(
             {"detail": "Google token response not JSON", "raw": token_resp.text},
             status=500,

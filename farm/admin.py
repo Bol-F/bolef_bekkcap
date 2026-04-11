@@ -1,109 +1,240 @@
-import json
+from django.contrib import admin
 
-import requests
-from allauth.socialaccount.models import SocialApp
-from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
-from allauth.socialaccount.providers.oauth2.client import (
-    OAuth2Client as AllauthOAuth2Client,
+from .models import (
+    ActivityLog,
+    Animal,
+    Crop,
+    EmailOTP,
+    Farm,
+    Field,
+    UserProfile,
+    YieldRecord,
 )
-from dj_rest_auth.registration.views import SocialLoginView
-from django.conf import settings
-from django.http import JsonResponse
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-
-from .serializers import SetPasswordSerializer
 
 
-class PatchedOAuth2Client(AllauthOAuth2Client):
-    def __init__(self, request, consumer_key, consumer_secret, **kwargs):
-        kwargs.pop("scope_delimiter", None)
-        super().__init__(request, consumer_key, consumer_secret, **kwargs)
+@admin.register(Farm)
+class FarmAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "owner",
+        "farm_code",
+        "location",
+        "size_hectares",
+        "created_at",
+    )
+    search_fields = (
+        "name",
+        "farm_code",
+        "location",
+        "owner__username",
+        "owner__email",
+    )
+    list_filter = ("created_at",)
+    ordering = ("-created_at",)
+    autocomplete_fields = ("owner",)
 
 
-@method_decorator(csrf_exempt, name="dispatch")
-class GoogleLogin(SocialLoginView):
-    adapter_class = GoogleOAuth2Adapter
-    client_class = PatchedOAuth2Client
-
-
-@csrf_exempt
-@require_POST
-def exchange_google_code(request):
-    try:
-        data = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        return JsonResponse({"detail": "Invalid JSON"}, status=400)
-
-    code = data.get("code")
-    if not code:
-        return JsonResponse({"detail": "code is required"}, status=400)
-
-    try:
-        app = SocialApp.objects.get(provider="google")
-    except SocialApp.DoesNotExist:
-        return JsonResponse(
-            {"detail": "SocialApp(provider='google') not configured"},
-            status=500,
-        )
-    except SocialApp.MultipleObjectsReturned:
-        return JsonResponse(
-            {"detail": "Multiple Google SocialApp entries found. Keep only one."},
-            status=500,
-        )
-
-    redirect_uri = getattr(
-        settings,
-        "GOOGLE_REDIRECT_URI",
-        "http://127.0.0.1:8000/auth/google/callback/",
+@admin.register(Field)
+class FieldAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "farm",
+        "soil_type",
+        "area",
+        "latitude",
+        "longitude",
+        "has_location_display",
+    )
+    search_fields = (
+        "name",
+        "farm__name",
+        "farm__farm_code",
+        "farm__owner__username",
+        "farm__owner__email",
+    )
+    list_filter = ("soil_type", "farm")
+    ordering = ("farm", "name")
+    autocomplete_fields = ("farm",)
+    readonly_fields = (
+        "bbox_min_lon",
+        "bbox_max_lon",
+        "bbox_min_lat",
+        "bbox_max_lat",
+        "polygon_area_approx_ha",
     )
 
-    try:
-        token_resp = requests.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "code": code,
-                "client_id": app.client_id,
-                "client_secret": app.secret,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
+    fieldsets = (
+        (
+            "Basic info",
+            {
+                "fields": (
+                    "farm",
+                    "name",
+                    "area",
+                    "soil_type",
+                )
             },
-            timeout=20,
-        )
-    except requests.RequestException as exc:
-        return JsonResponse(
-            {"detail": "Failed to connect to Google token endpoint", "error": str(exc)},
-            status=502,
-        )
+        ),
+        (
+            "Location",
+            {
+                "fields": (
+                    ("latitude", "longitude"),
+                    "polygon",
+                )
+            },
+        ),
+        (
+            "Derived spatial info",
+            {
+                "fields": (
+                    ("bbox_min_lon", "bbox_max_lon"),
+                    ("bbox_min_lat", "bbox_max_lat"),
+                    "polygon_area_approx_ha",
+                )
+            },
+        ),
+    )
 
-    try:
-        token_data = token_resp.json()
-    except Exception:
-        return JsonResponse(
-            {"detail": "Google token response not JSON", "raw": token_resp.text},
-            status=500,
-        )
-
-    if token_resp.status_code != 200:
-        return JsonResponse({"google_error": token_data}, status=400)
-
-    return JsonResponse(token_data, status=200)
+    @admin.display(boolean=True, description="Has location")
+    def has_location_display(self, obj):
+        return obj.has_location
 
 
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def set_password(request):
-    serializer = SetPasswordSerializer(data=request.data, context={"request": request})
-    serializer.is_valid(raise_exception=True)
+@admin.register(Crop)
+class CropAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "field",
+        "field_farm",
+        "status",
+        "plant_date",
+        "expected_harvest_date",
+    )
+    search_fields = (
+        "name",
+        "field__name",
+        "field__farm__name",
+        "field__farm__owner__username",
+    )
+    list_filter = ("status", "plant_date", "expected_harvest_date")
+    ordering = ("-id",)
+    autocomplete_fields = ("field",)
 
-    password = serializer.validated_data["password"]
+    @admin.display(description="Farm")
+    def field_farm(self, obj):
+        return obj.field.farm.name
 
-    request.user.set_password(password)
-    request.user.save(update_fields=["password"])
 
-    return Response({"detail": "Password set"}, status=status.HTTP_200_OK)
+@admin.register(Animal)
+class AnimalAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "species",
+        "tag_id",
+        "farm",
+        "health_status",
+        "birth_date",
+    )
+    search_fields = (
+        "species",
+        "tag_id",
+        "farm__name",
+        "farm__owner__username",
+    )
+    list_filter = ("health_status", "farm")
+    ordering = ("species", "tag_id")
+    autocomplete_fields = ("farm",)
+
+
+@admin.register(ActivityLog)
+class ActivityLogAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "farm",
+        "activity_type",
+        "date",
+        "field",
+        "crop",
+        "animal",
+        "created_by",
+        "created_at",
+    )
+    search_fields = (
+        "farm__name",
+        "field__name",
+        "crop__name",
+        "animal__tag_id",
+        "description",
+        "created_by__username",
+    )
+    list_filter = ("activity_type", "date", "created_at")
+    ordering = ("-date", "-created_at")
+    autocomplete_fields = ("farm", "field", "crop", "animal", "created_by")
+
+
+@admin.register(YieldRecord)
+class YieldRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "farm",
+        "field",
+        "crop_type",
+        "season",
+        "irrigation_type",
+        "soil_type",
+        "farm_area_acres",
+        "actual_yield_tons",
+        "predicted_yield_tons",
+        "created_at",
+    )
+    search_fields = (
+        "crop_type",
+        "farm__name",
+        "field__name",
+        "farm__owner__username",
+        "model_name",
+    )
+    list_filter = (
+        "season",
+        "irrigation_type",
+        "soil_type",
+        "created_at",
+    )
+    ordering = ("-created_at",)
+    autocomplete_fields = ("farm", "field")
+    readonly_fields = (
+        "predicted_yield_tons",
+        "model_name",
+        "confidence_score",
+        "prediction_created_at",
+        "created_at",
+    )
+
+
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "phone")
+    search_fields = ("user__username", "user__email", "phone")
+    autocomplete_fields = ("user",)
+
+
+@admin.register(EmailOTP)
+class EmailOTPAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "email",
+        "expires_at",
+        "attempts_left",
+        "used",
+        "created_at",
+    )
+    search_fields = ("user__username", "user__email", "email")
+    list_filter = ("used", "created_at", "expires_at")
+    ordering = ("-created_at",)
+    autocomplete_fields = ("user",)
+    readonly_fields = ("created_at",)

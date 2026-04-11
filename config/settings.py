@@ -1,17 +1,10 @@
-# config/settings.py
 import os
 from datetime import timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# =============================================================================
-# BASE
-# =============================================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Load .env if exists (works for manage.py shell + local; on PythonAnywhere
-# it's still better to set env vars in Web tab)
 load_dotenv(BASE_DIR / ".env")
 
 
@@ -31,25 +24,13 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
-# =============================================================================
-# SECURITY
-# =============================================================================
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-default-key")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 
 _raw_hosts = env_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
-ALLOWED_HOSTS = ["*"] if ("*" in _raw_hosts) else _raw_hosts
+ALLOWED_HOSTS = ["*"] if "*" in _raw_hosts else _raw_hosts
 
-# USE_X_FORWARDED_HOST = env_bool("USE_X_FORWARDED_HOST", False)
-# SECURE_PROXY_SSL_HEADER = (
-#     ("HTTP_X_FORWARDED_PROTO", "https")
-#     if env_bool("SECURE_PROXY_SSL_HEADER", False)
-#     else None
-# )
 
-# =============================================================================
-# APPS
-# =============================================================================
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -58,28 +39,24 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.sites",
-    # Third-party
     "corsheaders",
     "rest_framework",
     "rest_framework.authtoken",
     "rest_framework_simplejwt.token_blacklist",
-    "drf_yasg",
-    # allauth + dj-rest-auth
+    "drf_spectacular",
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
     "dj_rest_auth",
     "dj_rest_auth.registration",
-    # Local
     "farm",
-    'soil_monitoring',
-    "weather",
+    "soil_monitoring",
+    "ndvi",
+    # "weather",
 ]
 
-# =============================================================================
-# MIDDLEWARE
-# =============================================================================
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -93,9 +70,7 @@ MIDDLEWARE = [
     "allauth.account.middleware.AccountMiddleware",
 ]
 
-# =============================================================================
-# URLS / TEMPLATES
-# =============================================================================
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
@@ -115,9 +90,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# =============================================================================
-# DATABASE
-# =============================================================================
+
 DB_ENGINE = (os.getenv("DB_ENGINE", "sqlite") or "sqlite").strip().lower()
 
 if DB_ENGINE in ("postgres", "postgresql"):
@@ -126,7 +99,7 @@ if DB_ENGINE in ("postgres", "postgresql"):
             "ENGINE": "django.db.backends.postgresql",
             "NAME": os.getenv("DB_NAME", "bolef_bakkcap"),
             "USER": os.getenv("DB_USER", "postgres"),
-            "PASSWORD": os.getenv("DB_PASSWORD", "1"),
+            "PASSWORD": os.getenv("DB_PASSWORD", ""),
             "HOST": os.getenv("DB_HOST", "127.0.0.1"),
             "PORT": os.getenv("DB_PORT", "5432"),
             "OPTIONS": {"client_encoding": "UTF8"},
@@ -140,9 +113,7 @@ else:
         }
     }
 
-# =============================================================================
-# AUTH / PASSWORDS
-# =============================================================================
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
@@ -159,17 +130,13 @@ AUTHENTICATION_BACKENDS = [
 
 SITE_ID = env_int("SITE_ID", 1)
 
-# =============================================================================
-# INTERNATIONALIZATION
-# =============================================================================
+
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Tashkent"
 USE_I18N = True
 USE_TZ = True
 
-# =============================================================================
-# STATIC / MEDIA
-# =============================================================================
+
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
@@ -177,38 +144,39 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-# =============================================================================
-# CORS / CSRF
-# =============================================================================
-CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", True)
+
+CORS_ALLOW_ALL_ORIGINS = env_bool("CORS_ALLOW_ALL_ORIGINS", False)
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", True)
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", "")
+CSRF_TRUSTED_ORIGINS = env_list("CSRF_TRUSTED_ORIGINS", "")
 
-# CSRF_TRUSTED_ORIGINS = env_list(
-#     "CSRF_TRUSTED_ORIGINS",
-#     "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000",
-# )
 
-# =============================================================================
-# DRF
-# =============================================================================
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ],
-    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 10,
     "DEFAULT_FILTER_BACKENDS": [
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
-# =============================================================================
-# JWT
-# =============================================================================
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Farm API",
+    "DESCRIPTION": "API for farms, fields, soil monitoring, yield prediction, and NDVI monitoring.",
+    "VERSION": "v1",
+    "SERVE_INCLUDE_SCHEMA": False,
+}
+
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=10),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
@@ -216,14 +184,13 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": True,
 }
 
-# =============================================================================
-# dj-rest-auth
-# =============================================================================
-REST_AUTH = {"USE_JWT": True, "JWT_AUTH_HTTPONLY": False}
 
-# =============================================================================
-# allauth
-# =============================================================================
+REST_AUTH = {
+    "USE_JWT": True,
+    "JWT_AUTH_HTTPONLY": False,
+}
+
+
 ACCOUNT_LOGIN_METHODS = {"email", "username"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "username*", "password1*", "password2*"]
 ACCOUNT_EMAIL_VERIFICATION = os.getenv("ACCOUNT_EMAIL_VERIFICATION", "none")
@@ -242,45 +209,30 @@ SOCIALACCOUNT_PROVIDERS = {
 
 LOGIN_REDIRECT_URL = os.getenv("LOGIN_REDIRECT_URL", "/")
 ACCOUNT_LOGOUT_REDIRECT_URL = os.getenv("ACCOUNT_LOGOUT_REDIRECT_URL", "/")
-
-# GOOGLE_REDIRECT_URI = os.getenv(
-#     "GOOGLE_REDIRECT_URI",
-#     "http://127.0.0.1:8000/auth/google/callback/",
-# )
-
 ENABLE_ALLAUTH_PAGES = env_bool("ENABLE_ALLAUTH_PAGES", False)
 
-# =============================================================================
-# EMAIL (SMTP)
-# =============================================================================
-# Supports both naming styles:
-# - SMTP_USER / SMTP_PASSWORD  (your current .env)
-# - EMAIL_HOST_USER / EMAIL_HOST_PASSWORD (django style)
-EMAIL_BACKEND = os.getenv(
-    "EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend"
-)
 
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.smtp.EmailBackend",
+)
 EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
 EMAIL_PORT = env_int("EMAIL_PORT", 587)
-
 EMAIL_USE_TLS = env_bool("EMAIL_USE_TLS", True)
-EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)  # for port 465 обычно True
-
-EMAIL_TIMEOUT = env_int("EMAIL_TIMEOUT", 20)  # seconds
+EMAIL_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+EMAIL_TIMEOUT = env_int("EMAIL_TIMEOUT", 20)
 
 EMAIL_HOST_USER = (os.getenv("EMAIL_HOST_USER") or os.getenv("SMTP_USER") or "").strip()
 EMAIL_HOST_PASSWORD = (
     os.getenv("EMAIL_HOST_PASSWORD") or os.getenv("SMTP_PASSWORD") or ""
-)
+).strip()
 
 DEFAULT_FROM_EMAIL = (
     os.getenv("DEFAULT_FROM_EMAIL") or EMAIL_HOST_USER or "no-reply@bolef.local"
 ).strip()
 SERVER_EMAIL = os.getenv("SERVER_EMAIL", DEFAULT_FROM_EMAIL)
 
-# =============================================================================
-# LOGGING (важно для отладки email)
-# =============================================================================
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -288,7 +240,6 @@ LOGGING = {
         "console": {"class": "logging.StreamHandler"},
     },
     "loggers": {
-        # Покажет ошибки отправки email в error log PythonAnywhere
         "django.core.mail": {
             "handlers": ["console"],
             "level": "DEBUG",
@@ -297,12 +248,20 @@ LOGGING = {
     },
 }
 
-# =============================================================================
-# MISC
-# =============================================================================
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
-CACHES = {
-    "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}
-}
+
+# NDVI / Sentinel settings
+NDVI_DATA_SOURCE = os.getenv("NDVI_DATA_SOURCE", "synthetic").strip().lower()
+HF_DATASET_ID = os.getenv(
+    "HF_DATASET_ID",
+    "jaelin215/sentinel-2-reanalysis-NDVI-EVI-TCG",
+)
+SENTINEL_CLIENT_ID = os.getenv("SENTINEL_CLIENT_ID", "")
+SENTINEL_CLIENT_SECRET = os.getenv("SENTINEL_CLIENT_SECRET", "")
+SENTINEL_TOKEN_URL = "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+SENTINEL_STATS_API_URL = "https://sh.dataspace.copernicus.eu/api/v1/statistics"
+SENTINEL_PROCESS_API_URL = "https://sh.dataspace.copernicus.eu/api/v1/process"
