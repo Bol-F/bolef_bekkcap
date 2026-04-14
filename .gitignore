@@ -1,0 +1,57 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+pip-wheel-metadata/
+.python-version
+
+# === Django / DB ===
+db.sqlite3
+*.sqlite3
+*.sqlite3-journal
+
+media/
+staticfiles/
+static/
+
+# Local Django settings (если используешь)
+local_settings.py
+settings_local.py
+
+# === Virtual environments ===
+.env/
+.venv/
+venv/
+env/
+
+# === Environment files ===
+.env
+*.env
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.iml
+
+# === OS files ===
+.DS_Store
+Thumbs.db
+
+# === Logs ===
+*.log
+
+# === Tests / coverage / linters ===
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# === Migrations cache (optional) ===
+*/migrations/__pycache__/
