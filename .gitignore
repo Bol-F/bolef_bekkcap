@@ -63,3 +63,4 @@ htmlcov/
 /static/
 /public/uploads/
 *.log
+.env
