@@ -17,6 +17,8 @@ from .views import (
     LogoutView,
     RegisterView,
     UserProfileViewSet,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
     me,
 )
 
@@ -34,12 +36,12 @@ urlpatterns = [
     # ==========================
     # AUTH (JWT + custom)
     # ==========================
+    path("profiles/me/", me, name="profiles-me"),
     path("auth/register/", RegisterView.as_view(), name="auth-register"),
     path("auth/login/", TokenObtainPairView.as_view(), name="auth-login"),
     path("auth/refresh/", TokenRefreshView.as_view(), name="auth-refresh"),
     path("auth/verify/", TokenVerifyView.as_view(), name="auth-verify"),
     path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
-    path("auth/me/", me, name="auth-me"),
     path("auth/set-password/", set_password, name="auth-set-password"),
     # ==========================
     # EMAIL OTP
@@ -50,4 +52,17 @@ urlpatterns = [
     # API resources
     # ==========================
     path("", include(router.urls)),
+    # =============================
+    # vostanovka paroli
+    # ===============================
+    path(
+        "auth/password-reset/",
+        PasswordResetRequestView.as_view(),
+        name="password_reset_request",
+    ),
+    path(
+        "auth/password-reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="password_reset_confirm",
+    ),
 ]

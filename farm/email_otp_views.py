@@ -52,7 +52,8 @@ def create_and_send_otp(user) -> bool:
         send_mail(
             subject="Your verification code",
             message=f"Your verification code: {code}\nValid for 10 minutes.",
-            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None)
+            or getattr(settings, "EMAIL_HOST_USER", None),
             recipient_list=[email],
             fail_silently=False,
         )
@@ -117,6 +118,11 @@ def verify_email_code(request):
         return Response(
             {"detail": "email and code are required"},
             status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if len(code) != 6 or not code.isdigit():
+        return Response(
+            {"detail": "Invalid code format"}, status=status.HTTP_400_BAD_REQUEST
         )
 
     qs = User.objects.filter(email__iexact=email).order_by("-id")
