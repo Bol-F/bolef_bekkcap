@@ -55,3 +55,11 @@ htmlcov/
 
 # === Migrations cache (optional) ===
 */migrations/__pycache__/
+
+# .gitignore
+.env
+.env.local
+.env.*.local
+/static/
+/public/uploads/
+*.log
