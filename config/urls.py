@@ -2,7 +2,6 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
-
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -12,11 +11,11 @@ from drf_spectacular.views import (
 from farm.auth_views import GoogleLogin, exchange_google_code
 from farm.email_otp_views import send_email_code, verify_email_code
 
-
 urlpatterns = [
     path("admin/", admin.site.urls),
     # Main API
     path("api/v1/", include("farm.urls")),
+    path("api/v1/weather/", include("weather.urls")),
     path("api/v1/soil/", include("soil_monitoring.urls")),
     path("api/v1/ndvi/", include("ndvi.urls")),
     # dj-rest-auth
