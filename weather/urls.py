@@ -5,6 +5,7 @@ from .views import (
     FieldIrrigationPlanView,
     FieldLatestIrrigationPlanView,
     FieldLatestWeatherView,
+    FieldWeatherAdviceView,
     WeatherHealthView,
 )
 
@@ -16,4 +17,5 @@ urlpatterns = [
     path("fields/<int:field_id>/latest/", FieldLatestWeatherView.as_view(), name="field-latest-weather"),
     path("fields/<int:field_id>/irrigation-plan/", FieldIrrigationPlanView.as_view(), name="field-irrigation-plan"),
     path("fields/<int:field_id>/irrigation-plan/latest/", FieldLatestIrrigationPlanView.as_view(), name="field-latest-irrigation-plan"),
+    path("fields/<int:field_id>/advice/", FieldWeatherAdviceView.as_view(), name="field-weather-advice"),
 ]

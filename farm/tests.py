@@ -1,128 +1,146 @@
-from django.contrib import admin
+from django.contrib.auth import get_user_model
+from rest_framework import status
+from rest_framework.test import APIClient, APITestCase
 
-from .models import (
-    ActivityLog,
-    Animal,
-    Crop,
-    EmailOTP,
-    Farm,
-    Field,
-    UserProfile,
-    YieldRecord,
-)
+from .models import Farm, Field
+
+User = get_user_model()
 
 
-@admin.register(Farm)
-class FarmAdmin(admin.ModelAdmin):
-    list_display = (
-        "id",
-        "name",
-        "farm_code",
-        "owner",
-        "location",
-        "size_hectares",
-        "created_at",
-    )
-    search_fields = ("name", "farm_code", "location", "owner__username", "owner__email")
-    list_filter = ("created_at",)
-    ordering = ("-created_at",)
+class FarmFieldApiTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="user1",
+            email="user1@example.com",
+            password="Testpass123!",
+        )
+        self.other_user = User.objects.create_user(
+            username="user2",
+            email="user2@example.com",
+            password="Testpass123!",
+        )
 
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
 
-@admin.register(Field)
-class FieldAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "farm", "area", "soil_type", "latitude", "longitude")
-    search_fields = ("name", "farm__name")
-    list_filter = ("soil_type", "farm")
-    ordering = ("id",)
+        self.farm_polygon = [
+            [69.2400, 41.2990],
+            [69.2700, 41.2990],
+            [69.2700, 41.3200],
+            [69.2400, 41.3200],
+            [69.2400, 41.2990],
+        ]
 
+        self.farm = Farm.objects.create(
+            owner=self.user,
+            name="Main Farm",
+            location="Tashkent",
+            size_hectares="100.00",
+            polygon=self.farm_polygon,
+        )
 
-@admin.register(Crop)
-class CropAdmin(admin.ModelAdmin):
-    list_display = (
-        "id",
-        "name",
-        "field",
-        "status",
-        "plant_date",
-        "expected_harvest_date",
-    )
-    search_fields = ("name", "field__name", "field__farm__name")
-    list_filter = ("status", "plant_date", "expected_harvest_date")
-    ordering = ("-id",)
+    def test_create_farm_with_polygon(self):
+        payload = {
+            "name": "Second Farm",
+            "location": "Tashkent region",
+            "size_hectares": "150.00",
+            "polygon": [
+                [69.3000, 41.3000],
+                [69.3400, 41.3000],
+                [69.3400, 41.3300],
+                [69.3000, 41.3300],
+                [69.3000, 41.3000],
+            ],
+        }
 
+        response = self.client.post("/api/v1/farms/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["name"], "Second Farm")
+        self.assertTrue(response.data["has_location"])
 
-@admin.register(Animal)
-class AnimalAdmin(admin.ModelAdmin):
-    list_display = ("id", "species", "tag_id", "farm", "health_status", "birth_date")
-    search_fields = ("species", "tag_id", "farm__name")
-    list_filter = ("health_status", "species")
-    ordering = ("species", "tag_id")
+    def test_create_field_inside_farm(self):
+        payload = {
+            "farm": self.farm.id,
+            "name": "Field A",
+            "area": "10.00",
+            "soil_type": "loamy",
+            "polygon": [
+                [69.2450, 41.3020],
+                [69.2550, 41.3020],
+                [69.2550, 41.3090],
+                [69.2450, 41.3090],
+                [69.2450, 41.3020],
+            ],
+        }
 
+        response = self.client.post("/api/v1/fields/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(response.data["name"], "Field A")
+        self.assertTrue(response.data["has_location"])
 
-@admin.register(ActivityLog)
-class ActivityLogAdmin(admin.ModelAdmin):
-    list_display = (
-        "id",
-        "date",
-        "activity_type",
-        "farm",
-        "field",
-        "crop",
-        "animal",
-        "created_by",
-        "created_at",
-    )
-    search_fields = (
-        "description",
-        "farm__name",
-        "field__name",
-        "crop__name",
-        "animal__tag_id",
-    )
-    list_filter = ("activity_type", "date", "created_at")
-    ordering = ("-date", "-created_at")
-    readonly_fields = ("created_at",)
+    def test_create_field_outside_farm_fails(self):
+        payload = {
+            "farm": self.farm.id,
+            "name": "Bad Field",
+            "area": "10.00",
+            "soil_type": "loamy",
+            "polygon": [
+                [69.5000, 41.5000],
+                [69.5100, 41.5000],
+                [69.5100, 41.5100],
+                [69.5000, 41.5100],
+                [69.5000, 41.5000],
+            ],
+        }
 
+        response = self.client.post("/api/v1/fields/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("polygon", response.data)
 
-@admin.register(YieldRecord)
-class YieldRecordAdmin(admin.ModelAdmin):
-    list_display = (
-        "id",
-        "farm",
-        "crop_type",
-        "season",
-        "irrigation_type",
-        "soil_type",
-        "farm_area_acres",
-        "actual_yield_tons",
-        "predicted_yield_tons",
-        "model_name",
-        "created_at",
-    )
-    search_fields = ("farm__name", "crop_type", "model_name", "notes")
-    list_filter = ("season", "irrigation_type", "soil_type", "model_name")
-    ordering = ("-created_at",)
-    readonly_fields = ("created_at", "prediction_created_at")
+    def test_create_field_bigger_than_farm_size_fails(self):
+        payload = {
+            "farm": self.farm.id,
+            "name": "Too Big",
+            "area": "150.00",
+            "soil_type": "loamy",
+            "polygon": [
+                [69.2450, 41.3020],
+                [69.2550, 41.3020],
+                [69.2550, 41.3090],
+                [69.2450, 41.3090],
+                [69.2450, 41.3020],
+            ],
+        }
 
+        response = self.client.post("/api/v1/fields/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("area", response.data)
 
-@admin.register(UserProfile)
-class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "phone")
-    search_fields = ("user__username", "user__email", "phone")
+    def test_other_user_cannot_see_my_farms(self):
+        other_client = APIClient()
+        other_client.force_authenticate(self.other_user)
 
+        response = other_client.get("/api/v1/farms/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 0)
 
-@admin.register(EmailOTP)
-class EmailOTPAdmin(admin.ModelAdmin):
-    list_display = (
-        "id",
-        "user",
-        "email",
-        "expires_at",
-        "attempts_left",
-        "used",
-        "created_at",
-    )
-    search_fields = ("email", "user__username", "user__email")
-    list_filter = ("used", "created_at")
-    ordering = ("-created_at",)
-    readonly_fields = ("created_at",)
+    def test_other_user_cannot_create_field_in_my_farm(self):
+        other_client = APIClient()
+        other_client.force_authenticate(self.other_user)
+
+        payload = {
+            "farm": self.farm.id,
+            "name": "Hack Field",
+            "area": "5.00",
+            "soil_type": "loamy",
+            "polygon": [
+                [69.2450, 41.3020],
+                [69.2550, 41.3020],
+                [69.2550, 41.3090],
+                [69.2450, 41.3090],
+                [69.2450, 41.3020],
+            ],
+        }
+
+        response = other_client.post("/api/v1/fields/", payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

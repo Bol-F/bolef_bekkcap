@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.shortcuts import get_object_or_404
 
 from drf_spectacular.utils import extend_schema
@@ -13,14 +12,16 @@ from .models import IrrigationRecommendation, WeatherSnapshot
 from .serializers import (
     ErrorResponseSerializer,
     FieldIrrigationPlanResponseSerializer,
+    FieldWeatherAdviceResponseSerializer,
     FieldWeatherResponseSerializer,
     IrrigationRecommendationSerializer,
     WeatherHealthResponseSerializer,
+    WeatherRefreshRequestSerializer,
     WeatherSnapshotSerializer,
 )
 from .services import (
-    create_irrigation_recommendation_for_field,
-    create_weather_snapshot_for_field,
+    ensure_fresh_irrigation_recommendation,
+    ensure_fresh_weather_snapshot,
 )
 
 
@@ -55,6 +56,7 @@ class FieldForecastView(APIView):
 
     @extend_schema(
         operation_id="field_weather_forecast",
+        request=WeatherRefreshRequestSerializer,
         responses={
             200: FieldWeatherResponseSerializer,
             400: ErrorResponseSerializer,
@@ -66,8 +68,15 @@ class FieldForecastView(APIView):
     def post(self, request, field_id):
         field = get_owned_field(request.user, field_id)
 
+        options = WeatherRefreshRequestSerializer(data=request.data or {})
+        options.is_valid(raise_exception=True)
+
         try:
-            snapshot = create_weather_snapshot_for_field(field)
+            snapshot = ensure_fresh_weather_snapshot(
+                field=field,
+                max_age_hours=options.validated_data["max_age_hours"],
+                force_refresh=options.validated_data["force_refresh"],
+            )
         except ValueError as exc:
             return Response(
                 {"error": "Field location is not set", "detail": str(exc)},
@@ -133,6 +142,7 @@ class FieldIrrigationPlanView(APIView):
 
     @extend_schema(
         operation_id="field_irrigation_plan",
+        request=WeatherRefreshRequestSerializer,
         responses={
             200: FieldIrrigationPlanResponseSerializer,
             400: ErrorResponseSerializer,
@@ -144,8 +154,15 @@ class FieldIrrigationPlanView(APIView):
     def post(self, request, field_id):
         field = get_owned_field(request.user, field_id)
 
+        options = WeatherRefreshRequestSerializer(data=request.data or {})
+        options.is_valid(raise_exception=True)
+
         try:
-            recommendation = create_irrigation_recommendation_for_field(field)
+            _, recommendation = ensure_fresh_irrigation_recommendation(
+                field=field,
+                max_age_hours=options.validated_data["max_age_hours"],
+                force_refresh=options.validated_data["force_refresh"],
+            )
         except ValueError as exc:
             return Response(
                 {"error": "Field location is not set", "detail": str(exc)},
@@ -206,6 +223,54 @@ class FieldLatestIrrigationPlanView(APIView):
                 "recommendation": IrrigationRecommendationSerializer(
                     recommendation
                 ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class FieldWeatherAdviceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        operation_id="field_weather_advice",
+        request=WeatherRefreshRequestSerializer,
+        responses={
+            200: FieldWeatherAdviceResponseSerializer,
+            400: ErrorResponseSerializer,
+            404: ErrorResponseSerializer,
+            502: ErrorResponseSerializer,
+        },
+        tags=["Weather"],
+    )
+    def post(self, request, field_id):
+        field = get_owned_field(request.user, field_id)
+
+        options = WeatherRefreshRequestSerializer(data=request.data or {})
+        options.is_valid(raise_exception=True)
+
+        try:
+            snapshot, recommendation = ensure_fresh_irrigation_recommendation(
+                field=field,
+                max_age_hours=options.validated_data["max_age_hours"],
+                force_refresh=options.validated_data["force_refresh"],
+            )
+        except ValueError as exc:
+            return Response(
+                {"error": "Field location is not set", "detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception as exc:
+            return Response(
+                {"error": "Weather advice failed", "detail": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(
+            {
+                "field_id": field.id,
+                "field_name": field.name,
+                "snapshot": WeatherSnapshotSerializer(snapshot).data,
+                "recommendation": IrrigationRecommendationSerializer(recommendation).data,
             },
             status=status.HTTP_200_OK,
         )

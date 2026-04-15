@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -37,6 +38,112 @@ IRRIGATION_CHOICES = [
 ]
 
 
+def _normalize_polygon(polygon):
+    if not polygon:
+        return polygon
+
+    if not isinstance(polygon, list):
+        raise ValidationError("Polygon must be a list of [lon, lat] points.")
+
+    normalized = []
+    for pt in polygon:
+        if not isinstance(pt, list) or len(pt) != 2:
+            raise ValidationError(f"Each polygon point must be [lon, lat]. Got: {pt}")
+
+        lon, lat = pt
+        if not (-180 <= lon <= 180):
+            raise ValidationError(f"Polygon longitude out of range: {lon}")
+        if not (-90 <= lat <= 90):
+            raise ValidationError(f"Polygon latitude out of range: {lat}")
+
+        normalized.append([float(lon), float(lat)])
+
+    if len(normalized) < 4:
+        raise ValidationError("Polygon must have at least 4 coordinate pairs.")
+
+    if normalized[0] != normalized[-1]:
+        normalized.append(normalized[0])
+
+    return normalized
+
+
+def _unique_polygon_points(polygon):
+    if not polygon:
+        return []
+    if len(polygon) >= 2 and polygon[0] == polygon[-1]:
+        return polygon[:-1]
+    return polygon
+
+
+def _polygon_centroid(polygon):
+    points = _unique_polygon_points(polygon)
+    if not points:
+        return None, None
+
+    lons = [float(p[0]) for p in points]
+    lats = [float(p[1]) for p in points]
+
+    center_lon = sum(lons) / len(lons)
+    center_lat = sum(lats) / len(lats)
+    return center_lat, center_lon
+
+
+def _polygon_bbox(polygon):
+    points = _unique_polygon_points(polygon)
+    if not points:
+        return None, None, None, None
+
+    lons = [float(p[0]) for p in points]
+    lats = [float(p[1]) for p in points]
+
+    return min(lons), max(lons), min(lats), max(lats)
+
+
+def _polygon_area_approx_ha(polygon, center_lat: float = 0.0):
+    points = _unique_polygon_points(polygon)
+    if len(points) < 3:
+        return None
+
+    area = 0.0
+    n = len(points)
+    for i in range(n):
+        j = (i + 1) % n
+        area += points[i][0] * points[j][1]
+        area -= points[j][0] * points[i][1]
+    area = abs(area) / 2.0
+
+    lat_rad = math.radians(center_lat)
+    meters_per_deg_lon = 111320 * math.cos(lat_rad)
+    meters_per_deg_lat = 110540
+    area_m2 = area * meters_per_deg_lon * meters_per_deg_lat
+    return round(area_m2 / 10_000, 2)
+
+
+def _point_in_polygon(point, polygon):
+    x, y = point
+    points = _unique_polygon_points(polygon)
+    inside = False
+
+    n = len(points)
+    if n < 3:
+        return False
+
+    p1x, p1y = points[0]
+    for i in range(1, n + 1):
+        p2x, p2y = points[i % n]
+        if min(p1y, p2y) < y <= max(p1y, p2y):
+            if x <= max(p1x, p2x):
+                if p1y != p2y:
+                    xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                else:
+                    xinters = p1x
+                if p1x == p2x or x <= xinters:
+                    inside = not inside
+        p1x, p1y = p2x, p2y
+
+    return inside
+
+
 class Farm(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="farms")
     name = models.CharField(max_length=100)
@@ -56,6 +163,33 @@ class Farm(models.Model):
         validators=[MinValueValidator(0)],
         help_text="Farm size in hectares",
     )
+
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(-90), MaxValueValidator(90)],
+        help_text="Farm center latitude",
+    )
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(-180), MaxValueValidator(180)],
+        help_text="Farm center longitude",
+    )
+    polygon = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Farm border polygon as [[lon, lat], ...]. Auto-closed on save.",
+    )
+    bbox_min_lon = models.FloatField(null=True, blank=True, editable=False)
+    bbox_max_lon = models.FloatField(null=True, blank=True, editable=False)
+    bbox_min_lat = models.FloatField(null=True, blank=True, editable=False)
+    bbox_max_lat = models.FloatField(null=True, blank=True, editable=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -63,10 +197,54 @@ class Farm(models.Model):
         indexes = [
             models.Index(fields=["owner", "created_at"]),
             models.Index(fields=["farm_code"]),
+            models.Index(fields=["latitude", "longitude"]),
         ]
 
     def __str__(self):
         return f"{self.name} ({getattr(self.owner, 'username', self.owner_id)})"
+
+    def clean(self):
+        super().clean()
+
+        if (self.latitude is None) ^ (self.longitude is None):
+            raise ValidationError("Set both latitude and longitude, or leave both empty.")
+
+        if self.polygon:
+            self.polygon = _normalize_polygon(self.polygon)
+
+    def save(self, *args, **kwargs):
+        if self.polygon:
+            self.polygon = _normalize_polygon(self.polygon)
+            self._sync_spatial_fields_from_polygon()
+
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def _sync_spatial_fields_from_polygon(self):
+        center_lat, center_lon = _polygon_centroid(self.polygon)
+        min_lon, max_lon, min_lat, max_lat = _polygon_bbox(self.polygon)
+
+        if center_lat is not None and center_lon is not None:
+            self.latitude = Decimal(f"{center_lat:.6f}")
+            self.longitude = Decimal(f"{center_lon:.6f}")
+
+        self.bbox_min_lon = min_lon
+        self.bbox_max_lon = max_lon
+        self.bbox_min_lat = min_lat
+        self.bbox_max_lat = max_lat
+
+    @property
+    def has_location(self) -> bool:
+        return bool(
+            (self.latitude is not None and self.longitude is not None) or self.polygon
+        )
+
+    @property
+    def polygon_area_approx_ha(self) -> float | None:
+        if not self.polygon:
+            return None
+        center_lat = float(self.latitude) if self.latitude is not None else 0.0
+        return _polygon_area_approx_ha(self.polygon, center_lat=center_lat)
 
 
 class Field(models.Model):
@@ -80,7 +258,6 @@ class Field(models.Model):
     )
     soil_type = models.CharField(max_length=20, choices=SOIL_CHOICES, default="loamy")
 
-    # Simple map support (legacy-compatible)
     latitude = models.DecimalField(
         max_digits=9,
         decimal_places=6,
@@ -98,11 +275,10 @@ class Field(models.Model):
         help_text="Field center longitude",
     )
 
-    # Better NDVI / map support
     polygon = models.JSONField(
         null=True,
         blank=True,
-        help_text="Optional polygon as [[lon, lat], [lon, lat], ...]. Auto-closed on save.",
+        help_text="Field polygon as [[lon, lat], ...]. Auto-closed on save.",
     )
     bbox_min_lon = models.FloatField(null=True, blank=True, editable=False)
     bbox_max_lon = models.FloatField(null=True, blank=True, editable=False)
@@ -129,65 +305,57 @@ class Field(models.Model):
         super().clean()
 
         if (self.latitude is None) ^ (self.longitude is None):
-            raise ValidationError(
-                "Set both latitude and longitude, or leave both empty."
-            )
+            raise ValidationError("Set both latitude and longitude, or leave both empty.")
 
         if self.polygon:
-            if not isinstance(self.polygon, list) or len(self.polygon) < 4:
-                raise ValidationError("Polygon must have at least 4 coordinate pairs.")
+            self.polygon = _normalize_polygon(self.polygon)
 
-            for pt in self.polygon:
-                if not isinstance(pt, list) or len(pt) != 2:
+        if self.polygon and self.farm and self.farm.polygon:
+            farm_polygon = _normalize_polygon(self.farm.polygon)
+            field_points = _unique_polygon_points(self.polygon)
+
+            for pt in field_points:
+                if not _point_in_polygon(pt, farm_polygon):
                     raise ValidationError(
-                        f"Each polygon point must be [lon, lat]. Got: {pt}"
+                        {
+                            "polygon": "Field polygon must stay inside the farm polygon."
+                        }
                     )
 
-                lon, lat = pt
-                if not (-180 <= lon <= 180):
-                    raise ValidationError(f"Polygon longitude out of range: {lon}")
-                if not (-90 <= lat <= 90):
-                    raise ValidationError(f"Polygon latitude out of range: {lat}")
+            field_area = self.polygon_area_approx_ha
+            farm_area = self.farm.polygon_area_approx_ha
+
+            if field_area is not None and farm_area is not None and field_area > farm_area:
+                raise ValidationError(
+                    {"polygon": "Field area cannot be bigger than farm area."}
+                )
+
+        if self.farm and self.farm.size_hectares is not None and self.area is not None:
+            if Decimal(self.area) > Decimal(self.farm.size_hectares):
+                raise ValidationError(
+                    {"area": "Field area cannot be bigger than farm size."}
+                )
 
     def save(self, *args, **kwargs):
-        self._normalize_polygon()
         if self.polygon:
+            self.polygon = _normalize_polygon(self.polygon)
             self._sync_spatial_fields_from_polygon()
+
         self.full_clean()
         super().save(*args, **kwargs)
 
-    def _normalize_polygon(self):
-        if not self.polygon or not isinstance(self.polygon, list):
-            return
-
-        if self.polygon[0] != self.polygon[-1]:
-            self.polygon.append(self.polygon[0])
-
-    def _unique_polygon_points(self):
-        if not self.polygon:
-            return []
-        if len(self.polygon) >= 2 and self.polygon[0] == self.polygon[-1]:
-            return self.polygon[:-1]
-        return self.polygon
-
     def _sync_spatial_fields_from_polygon(self):
-        points = self._unique_polygon_points()
-        if not points:
-            return
+        center_lat, center_lon = _polygon_centroid(self.polygon)
+        min_lon, max_lon, min_lat, max_lat = _polygon_bbox(self.polygon)
 
-        lons = [p[0] for p in points]
-        lats = [p[1] for p in points]
+        if center_lat is not None and center_lon is not None:
+            self.latitude = Decimal(f"{center_lat:.6f}")
+            self.longitude = Decimal(f"{center_lon:.6f}")
 
-        center_lon = sum(lons) / len(lons)
-        center_lat = sum(lats) / len(lats)
-
-        self.longitude = round(center_lon, 6)
-        self.latitude = round(center_lat, 6)
-
-        self.bbox_min_lon = min(lons)
-        self.bbox_max_lon = max(lons)
-        self.bbox_min_lat = min(lats)
-        self.bbox_max_lat = max(lats)
+        self.bbox_min_lon = min_lon
+        self.bbox_max_lon = max_lon
+        self.bbox_min_lat = min_lat
+        self.bbox_max_lat = max_lat
 
     @property
     def has_location(self) -> bool:
@@ -197,24 +365,10 @@ class Field(models.Model):
 
     @property
     def polygon_area_approx_ha(self) -> float | None:
-        points = self._unique_polygon_points()
-        if len(points) < 3:
+        if not self.polygon:
             return None
-
-        area = 0.0
-        n = len(points)
-        for i in range(n):
-            j = (i + 1) % n
-            area += points[i][0] * points[j][1]
-            area -= points[j][0] * points[i][1]
-        area = abs(area) / 2.0
-
         center_lat = float(self.latitude) if self.latitude is not None else 0.0
-        lat_rad = math.radians(center_lat)
-        meters_per_deg_lon = 111320 * math.cos(lat_rad)
-        meters_per_deg_lat = 110540
-        area_m2 = area * meters_per_deg_lon * meters_per_deg_lat
-        return round(area_m2 / 10_000, 2)
+        return _polygon_area_approx_ha(self.polygon, center_lat=center_lat)
 
 
 class Crop(models.Model):

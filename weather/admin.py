@@ -12,6 +12,7 @@ class WeatherSnapshotAdmin(admin.ModelAdmin):
         "forecast_date",
         "rain_next_24h_mm",
         "rain_next_72h_mm",
+        "rain_next_7d_mm",
         "evapotranspiration_24h",
         "avg_temperature_24h",
         "created_at",
@@ -43,6 +44,7 @@ class IrrigationRecommendationAdmin(admin.ModelAdmin):
         "recommended_time",
         "rain_next_24h_mm",
         "rain_next_72h_mm",
+        "rain_next_7d_mm",
         "created_at",
     )
     search_fields = (

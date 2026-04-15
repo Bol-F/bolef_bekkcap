@@ -4,18 +4,112 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from .models import ActivityLog, Animal, Crop, Farm, Field, UserProfile, YieldRecord
+from .models import ActivityLog, Animal, Crop, EmailOTP, Farm, Field, UserProfile, YieldRecord
 
 User = get_user_model()
 
 
 class FarmSerializer(serializers.ModelSerializer):
     owner = serializers.ReadOnlyField(source="owner.username")
+    has_location = serializers.BooleanField(read_only=True)
+    polygon_area_approx_ha = serializers.FloatField(read_only=True)
 
     class Meta:
         model = Farm
-        fields = ["id", "owner", "name", "location", "size_hectares", "created_at"]
-        read_only_fields = ["id", "owner", "created_at"]
+        fields = [
+            "id",
+            "owner",
+            "name",
+            "farm_code",
+            "location",
+            "size_hectares",
+            "latitude",
+            "longitude",
+            "polygon",
+            "bbox_min_lon",
+            "bbox_max_lon",
+            "bbox_min_lat",
+            "bbox_max_lat",
+            "has_location",
+            "polygon_area_approx_ha",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "owner",
+            "bbox_min_lon",
+            "bbox_max_lon",
+            "bbox_min_lat",
+            "bbox_max_lat",
+            "has_location",
+            "polygon_area_approx_ha",
+            "created_at",
+        ]
+
+    def validate_polygon(self, value):
+        if value in (None, "", []):
+            return None
+
+        if not isinstance(value, list) or len(value) < 4:
+            raise serializers.ValidationError("Polygon must have at least 4 coordinate pairs.")
+
+        normalized = []
+        for pt in value:
+            if not isinstance(pt, list) or len(pt) != 2:
+                raise serializers.ValidationError(f"Each polygon point must be [lon, lat]. Got: {pt}")
+
+            lon, lat = pt
+            if not (-180 <= lon <= 180):
+                raise serializers.ValidationError(f"Longitude out of range: {lon}")
+            if not (-90 <= lat <= 90):
+                raise serializers.ValidationError(f"Latitude out of range: {lat}")
+
+            normalized.append([float(lon), float(lat)])
+
+        if normalized[0] != normalized[-1]:
+            normalized.append(normalized[0])
+
+        return normalized
+
+    def validate(self, attrs):
+        latitude = attrs.get("latitude", getattr(self.instance, "latitude", None))
+        longitude = attrs.get("longitude", getattr(self.instance, "longitude", None))
+        polygon = attrs.get("polygon", getattr(self.instance, "polygon", None))
+
+        if (latitude is None) ^ (longitude is None):
+            raise ValidationError("Set both latitude and longitude, or leave both empty.")
+
+        if not polygon and latitude is None and longitude is None:
+            raise ValidationError(
+                {
+                    "polygon": "Provide either a farm polygon or latitude/longitude.",
+                    "latitude": "Provide either a farm polygon or latitude/longitude.",
+                    "longitude": "Provide either a farm polygon or latitude/longitude.",
+                }
+            )
+
+        return attrs
+
+    def _approx_polygon_area_ha(self, polygon):
+        points = polygon[:-1] if polygon and polygon[0] == polygon[-1] else polygon
+        if len(points) < 3:
+            return None
+
+        area = 0.0
+        n = len(points)
+        for i in range(n):
+            j = (i + 1) % n
+            area += points[i][0] * points[j][1]
+            area -= points[j][0] * points[i][1]
+        area = abs(area) / 2.0
+
+        center_lat = sum(p[1] for p in points) / len(points)
+        import math
+        lat_rad = math.radians(center_lat)
+        meters_per_deg_lon = 111320 * math.cos(lat_rad)
+        meters_per_deg_lat = 110540
+        area_m2 = area * meters_per_deg_lon * meters_per_deg_lat
+        return round(area_m2 / 10_000, 2)
 
 
 class FieldSerializer(serializers.ModelSerializer):
@@ -62,16 +156,12 @@ class FieldSerializer(serializers.ModelSerializer):
             return None
 
         if not isinstance(value, list) or len(value) < 4:
-            raise serializers.ValidationError(
-                "Polygon must have at least 4 coordinate pairs."
-            )
+            raise serializers.ValidationError("Polygon must have at least 4 coordinate pairs.")
 
         normalized = []
         for pt in value:
             if not isinstance(pt, list) or len(pt) != 2:
-                raise serializers.ValidationError(
-                    f"Each polygon point must be [lon, lat]. Got: {pt}"
-                )
+                raise serializers.ValidationError(f"Each polygon point must be [lon, lat]. Got: {pt}")
 
             lon, lat = pt
             if not (-180 <= lon <= 180):
@@ -87,25 +177,89 @@ class FieldSerializer(serializers.ModelSerializer):
         return normalized
 
     def validate(self, attrs):
+        farm = attrs.get("farm", getattr(self.instance, "farm", None))
         latitude = attrs.get("latitude", getattr(self.instance, "latitude", None))
         longitude = attrs.get("longitude", getattr(self.instance, "longitude", None))
         polygon = attrs.get("polygon", getattr(self.instance, "polygon", None))
+        area = attrs.get("area", getattr(self.instance, "area", None))
+
+        if not farm:
+            raise ValidationError({"farm": "This field is required."})
 
         if (latitude is None) ^ (longitude is None):
-            raise ValidationError(
-                "Set both latitude and longitude, or leave both empty."
-            )
+            raise ValidationError("Set both latitude and longitude, or leave both empty.")
 
         if not polygon and latitude is None and longitude is None:
             raise ValidationError(
                 {
-                    "polygon": "Provide either a polygon or latitude/longitude.",
-                    "latitude": "Provide either a polygon or latitude/longitude.",
-                    "longitude": "Provide either a polygon or latitude/longitude.",
+                    "polygon": "Provide either a field polygon or latitude/longitude.",
+                    "latitude": "Provide either a field polygon or latitude/longitude.",
+                    "longitude": "Provide either a field polygon or latitude/longitude.",
                 }
             )
 
+        if farm.size_hectares is not None and area is not None and float(area) > float(farm.size_hectares):
+            raise ValidationError({"area": "Field area cannot be bigger than farm size."})
+
+        if polygon and farm.polygon:
+            farm_polygon = farm.polygon[:-1] if farm.polygon and farm.polygon[0] == farm.polygon[-1] else farm.polygon
+            field_points = polygon[:-1] if polygon and polygon[0] == polygon[-1] else polygon
+
+            for pt in field_points:
+                if not self._point_in_polygon(pt, farm_polygon):
+                    raise ValidationError(
+                        {"polygon": "Field polygon must stay inside the farm polygon."}
+                    )
+
+            field_area = self._approx_polygon_area_ha(polygon)
+            farm_area = getattr(farm, "polygon_area_approx_ha", None)
+            if field_area is not None and farm_area is not None and field_area > farm_area:
+                raise ValidationError({"polygon": "Field polygon area cannot be bigger than farm polygon area."})
+
         return attrs
+
+    def _point_in_polygon(self, point, polygon):
+        x, y = point
+        inside = False
+        n = len(polygon)
+        if n < 3:
+            return False
+
+        p1x, p1y = polygon[0]
+        for i in range(1, n + 1):
+            p2x, p2y = polygon[i % n]
+            if min(p1y, p2y) < y <= max(p1y, p2y):
+                if x <= max(p1x, p2x):
+                    if p1y != p2y:
+                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                    else:
+                        xinters = p1x
+                    if p1x == p2x or x <= xinters:
+                        inside = not inside
+            p1x, p1y = p2x, p2y
+
+        return inside
+
+    def _approx_polygon_area_ha(self, polygon):
+        points = polygon[:-1] if polygon and polygon[0] == polygon[-1] else polygon
+        if len(points) < 3:
+            return None
+
+        area = 0.0
+        n = len(points)
+        for i in range(n):
+            j = (i + 1) % n
+            area += points[i][0] * points[j][1]
+            area -= points[j][0] * points[i][1]
+        area = abs(area) / 2.0
+
+        center_lat = sum(p[1] for p in points) / len(points)
+        import math
+        lat_rad = math.radians(center_lat)
+        meters_per_deg_lon = 111320 * math.cos(lat_rad)
+        meters_per_deg_lat = 110540
+        area_m2 = area * meters_per_deg_lon * meters_per_deg_lat
+        return round(area_m2 / 10_000, 2)
 
 
 class CropSerializer(serializers.ModelSerializer):
@@ -129,9 +283,7 @@ class CropSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         request = self.context.get("request")
         if request and request.user.is_authenticated:
-            self.fields["field"].queryset = Field.objects.filter(
-                farm__owner=request.user
-            )
+            self.fields["field"].queryset = Field.objects.filter(farm__owner=request.user)
 
 
 class AnimalSerializer(serializers.ModelSerializer):
@@ -216,17 +368,11 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             raise ValidationError({"farm": "This field is required."})
 
         if field and field.farm_id != farm.id:
-            raise ValidationError(
-                {"field": "Field does not belong to the selected farm."}
-            )
+            raise ValidationError({"field": "Field does not belong to the selected farm."})
         if crop and crop.field.farm_id != farm.id:
-            raise ValidationError(
-                {"crop": "Crop does not belong to the selected farm."}
-            )
+            raise ValidationError({"crop": "Crop does not belong to the selected farm."})
         if animal and animal.farm_id != farm.id:
-            raise ValidationError(
-                {"animal": "Animal does not belong to the selected farm."}
-            )
+            raise ValidationError({"animal": "Animal does not belong to the selected farm."})
 
         return attrs
 
@@ -286,9 +432,7 @@ class YieldRecordSerializer(serializers.ModelSerializer):
             raise ValidationError({"farm": "This field is required."})
 
         if field and field.farm_id != farm.id:
-            raise ValidationError(
-                {"field": "Field does not belong to the selected farm."}
-            )
+            raise ValidationError({"field": "Field does not belong to the selected farm."})
 
         return attrs
 
@@ -352,9 +496,7 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["new_password2"]:
-            raise serializers.ValidationError(
-                {"new_password2": "Passwords must match."}
-            )
+            raise serializers.ValidationError({"new_password2": "Passwords must match."})
         validate_password(attrs["new_password"])
         attrs["email"] = (attrs["email"] or "").strip().lower()
         attrs["code"] = (attrs["code"] or "").strip()

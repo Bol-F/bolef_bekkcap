@@ -21,6 +21,9 @@ class FarmAdmin(admin.ModelAdmin):
         "farm_code",
         "location",
         "size_hectares",
+        "latitude",
+        "longitude",
+        "has_location_display",
         "created_at",
     )
     search_fields = (
@@ -33,6 +36,53 @@ class FarmAdmin(admin.ModelAdmin):
     list_filter = ("created_at",)
     ordering = ("-created_at",)
     autocomplete_fields = ("owner",)
+    readonly_fields = (
+        "bbox_min_lon",
+        "bbox_max_lon",
+        "bbox_min_lat",
+        "bbox_max_lat",
+        "polygon_area_approx_ha",
+        "created_at",
+    )
+
+    fieldsets = (
+        (
+            "Basic info",
+            {
+                "fields": (
+                    "owner",
+                    "name",
+                    "farm_code",
+                    "location",
+                    "size_hectares",
+                )
+            },
+        ),
+        (
+            "Location",
+            {
+                "fields": (
+                    ("latitude", "longitude"),
+                    "polygon",
+                )
+            },
+        ),
+        (
+            "Derived spatial info",
+            {
+                "fields": (
+                    ("bbox_min_lon", "bbox_max_lon"),
+                    ("bbox_min_lat", "bbox_max_lat"),
+                    "polygon_area_approx_ha",
+                    "created_at",
+                )
+            },
+        ),
+    )
+
+    @admin.display(boolean=True, description="Has location")
+    def has_location_display(self, obj):
+        return obj.has_location
 
 
 @admin.register(Field)

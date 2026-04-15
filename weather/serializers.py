@@ -18,6 +18,7 @@ class WeatherSnapshotSerializer(serializers.ModelSerializer):
             "forecast_date",
             "rain_next_24h_mm",
             "rain_next_72h_mm",
+            "rain_next_7d_mm",
             "max_rain_probability_24h",
             "evapotranspiration_24h",
             "avg_temperature_24h",
@@ -44,11 +45,17 @@ class IrrigationRecommendationSerializer(serializers.ModelSerializer):
             "recommended_time",
             "rain_next_24h_mm",
             "rain_next_72h_mm",
+            "rain_next_7d_mm",
             "evapotranspiration_24h",
             "evidence",
             "created_at",
         ]
         read_only_fields = fields
+
+
+class WeatherRefreshRequestSerializer(serializers.Serializer):
+    force_refresh = serializers.BooleanField(default=False)
+    max_age_hours = serializers.IntegerField(default=18, min_value=1, max_value=48)
 
 
 class WeatherHealthResponseSerializer(serializers.Serializer):
@@ -66,6 +73,13 @@ class FieldWeatherResponseSerializer(serializers.Serializer):
 class FieldIrrigationPlanResponseSerializer(serializers.Serializer):
     field_id = serializers.IntegerField()
     field_name = serializers.CharField()
+    recommendation = IrrigationRecommendationSerializer()
+
+
+class FieldWeatherAdviceResponseSerializer(serializers.Serializer):
+    field_id = serializers.IntegerField()
+    field_name = serializers.CharField()
+    snapshot = WeatherSnapshotSerializer()
     recommendation = IrrigationRecommendationSerializer()
 
 

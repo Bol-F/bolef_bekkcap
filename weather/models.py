@@ -27,6 +27,12 @@ class WeatherSnapshot(models.Model):
         null=True,
         blank=True,
     )
+    rain_next_7d_mm = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     max_rain_probability_24h = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -47,7 +53,6 @@ class WeatherSnapshot(models.Model):
     )
 
     raw_data = models.JSONField(default=dict, blank=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -106,7 +111,7 @@ class IrrigationRecommendation(models.Model):
     recommendation = models.TextField()
     reason = models.TextField(blank=True)
     recommended_time = models.CharField(
-        max_length=50,
+        max_length=100,
         blank=True,
         help_text="Example: early_morning, evening, after_rain, none",
     )
@@ -123,6 +128,12 @@ class IrrigationRecommendation(models.Model):
         null=True,
         blank=True,
     )
+    rain_next_7d_mm = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     evapotranspiration_24h = models.DecimalField(
         max_digits=7,
         decimal_places=2,
@@ -131,7 +142,6 @@ class IrrigationRecommendation(models.Model):
     )
 
     evidence = models.JSONField(default=dict, blank=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
