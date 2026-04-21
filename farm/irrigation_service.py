@@ -3,12 +3,17 @@ import requests
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
+# Thresholds (in mm over the next 24h and mm/day of evapotranspiration).
+HEAVY_RAIN_MM = 10.0
+DRY_RAIN_MM = 2.0
+LIGHT_RAIN_MM = 5.0
+HIGH_ETO_MM = 4.0
+
 
 def get_field_weather_forecast(latitude, longitude):
     if latitude is None or longitude is None:
         raise ValueError("Latitude and longitude are required.")
 
-    url = OPEN_METEO_URL
     params = {
         "latitude": float(latitude),
         "longitude": float(longitude),
@@ -17,7 +22,7 @@ def get_field_weather_forecast(latitude, longitude):
         "timezone": "auto",
     }
 
-    response = requests.get(url, params=params, timeout=20)
+    response = requests.get(OPEN_METEO_URL, params=params, timeout=20)
     response.raise_for_status()
     data = response.json()
 
@@ -27,13 +32,25 @@ def get_field_weather_forecast(latitude, longitude):
     return data
 
 
+def _safe_sum(values):
+    return sum(float(v or 0) for v in values)
+
+
+def _safe_avg(values):
+    numbers = [float(v) for v in values if v is not None]
+    if not numbers:
+        return None
+    return round(sum(numbers) / len(numbers), 2)
+
+
 def calculate_watering_status(weather_data):
     hourly = weather_data.get("hourly") or {}
     precipitation = hourly.get("precipitation") or []
     eto = hourly.get("reference_evapotranspiration") or []
     temperatures = hourly.get("temperature_2m") or []
 
-    if not precipitation or not eto:
+    # Precipitation is the primary signal. Without it we can't decide.
+    if not precipitation:
         return {
             "status": "unknown",
             "reason": "Weather forecast data is incomplete. Unable to calculate watering status reliably.",
@@ -45,54 +62,55 @@ def calculate_watering_status(weather_data):
 
     precipitation_24h = precipitation[:24]
     eto_24h = eto[:24]
-    temperatures_24h = temperatures[:24] if temperatures else []
+    temperatures_24h = temperatures[:24]
 
-    total_rain_24h = sum(float(x or 0) for x in precipitation_24h)
-    total_eto_24h = sum(float(x or 0) for x in eto_24h)
-    avg_temp_24h = (
-        round(sum(float(x or 0) for x in temperatures_24h) / len(temperatures_24h), 2)
-        if temperatures_24h
-        else None
-    )
+    total_rain_24h = _safe_sum(precipitation_24h)
+    total_eto_24h = _safe_sum(eto_24h) if eto_24h else None
+    avg_temp_24h = _safe_avg(temperatures_24h)
 
-    if total_rain_24h >= 10:
+    rain_rounded = round(total_rain_24h, 2)
+    eto_rounded = round(total_eto_24h, 2) if total_eto_24h is not None else None
+
+    base_payload = {
+        "rain_24h_mm": rain_rounded,
+        "eto_24h": eto_rounded,
+        "avg_temp_24h": avg_temp_24h,
+    }
+
+    if total_rain_24h >= HEAVY_RAIN_MM:
         return {
             "status": "rain_expected",
-            "reason": f"Rain forecast is high in the next 24h ({total_rain_24h:.2f} mm).",
+            "reason": f"Rain forecast is high in the next 24h ({rain_rounded:.2f} mm).",
             "recommended_window": None,
-            "rain_24h_mm": round(total_rain_24h, 2),
-            "eto_24h": round(total_eto_24h, 2),
-            "avg_temp_24h": avg_temp_24h,
+            **base_payload,
         }
 
-    if total_rain_24h < 2 and total_eto_24h >= 4:
+    if (
+        total_rain_24h < DRY_RAIN_MM
+        and total_eto_24h is not None
+        and total_eto_24h >= HIGH_ETO_MM
+    ):
         return {
             "status": "water_now",
             "reason": (
-                f"Low rain expected ({total_rain_24h:.2f} mm) and elevated "
-                f"evapotranspiration ({total_eto_24h:.2f})."
+                f"Low rain expected ({rain_rounded:.2f} mm) and elevated "
+                f"evapotranspiration ({eto_rounded:.2f})."
             ),
             "recommended_window": "early_morning",
-            "rain_24h_mm": round(total_rain_24h, 2),
-            "eto_24h": round(total_eto_24h, 2),
-            "avg_temp_24h": avg_temp_24h,
+            **base_payload,
         }
 
-    if total_rain_24h < 5:
+    if total_rain_24h < LIGHT_RAIN_MM:
         return {
             "status": "watch",
-            "reason": f"Limited rain forecast in the next 24h ({total_rain_24h:.2f} mm).",
+            "reason": f"Limited rain forecast in the next 24h ({rain_rounded:.2f} mm).",
             "recommended_window": "evening",
-            "rain_24h_mm": round(total_rain_24h, 2),
-            "eto_24h": round(total_eto_24h, 2),
-            "avg_temp_24h": avg_temp_24h,
+            **base_payload,
         }
 
     return {
         "status": "no_need",
         "reason": "Moisture conditions look acceptable for now.",
         "recommended_window": None,
-        "rain_24h_mm": round(total_rain_24h, 2),
-        "eto_24h": round(total_eto_24h, 2),
-        "avg_temp_24h": avg_temp_24h,
+        **base_payload,
     }

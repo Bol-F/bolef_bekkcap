@@ -206,17 +206,16 @@ class Farm(models.Model):
     def clean(self):
         super().clean()
 
-        if (self.latitude is None) ^ (self.longitude is None):
-            raise ValidationError("Set both latitude and longitude, or leave both empty.")
-
-        if self.polygon:
-            self.polygon = _normalize_polygon(self.polygon)
-
-    def save(self, *args, **kwargs):
         if self.polygon:
             self.polygon = _normalize_polygon(self.polygon)
             self._sync_spatial_fields_from_polygon()
 
+        if (self.latitude is None) ^ (self.longitude is None):
+            raise ValidationError(
+                "Set both latitude and longitude, or leave both empty."
+            )
+
+    def save(self, *args, **kwargs):
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -304,11 +303,14 @@ class Field(models.Model):
     def clean(self):
         super().clean()
 
-        if (self.latitude is None) ^ (self.longitude is None):
-            raise ValidationError("Set both latitude and longitude, or leave both empty.")
-
         if self.polygon:
             self.polygon = _normalize_polygon(self.polygon)
+            self._sync_spatial_fields_from_polygon()
+
+        if (self.latitude is None) ^ (self.longitude is None):
+            raise ValidationError(
+                "Set both latitude and longitude, or leave both empty."
+            )
 
         if self.polygon and self.farm and self.farm.polygon:
             farm_polygon = _normalize_polygon(self.farm.polygon)
@@ -317,15 +319,17 @@ class Field(models.Model):
             for pt in field_points:
                 if not _point_in_polygon(pt, farm_polygon):
                     raise ValidationError(
-                        {
-                            "polygon": "Field polygon must stay inside the farm polygon."
-                        }
+                        {"polygon": "Field polygon must stay inside the farm polygon."}
                     )
 
             field_area = self.polygon_area_approx_ha
             farm_area = self.farm.polygon_area_approx_ha
 
-            if field_area is not None and farm_area is not None and field_area > farm_area:
+            if (
+                field_area is not None
+                and farm_area is not None
+                and field_area > farm_area
+            ):
                 raise ValidationError(
                     {"polygon": "Field area cannot be bigger than farm area."}
                 )
@@ -337,10 +341,6 @@ class Field(models.Model):
                 )
 
     def save(self, *args, **kwargs):
-        if self.polygon:
-            self.polygon = _normalize_polygon(self.polygon)
-            self._sync_spatial_fields_from_polygon()
-
         self.full_clean()
         super().save(*args, **kwargs)
 

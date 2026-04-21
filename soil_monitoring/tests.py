@@ -100,7 +100,9 @@ class SoilMonitoringApiTests(APITestCase):
             "notes": "Healthy sample",
         }
 
-        response = self.client.post("/api/v1/soil/measurements/", payload, format="json")
+        response = self.client.post(
+            "/api/v1/soil/measurements/", payload, format="json"
+        )
         self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         self.assertEqual(SoilMeasurement.objects.count(), 1)
 
@@ -119,7 +121,9 @@ class SoilMonitoringApiTests(APITestCase):
             "notes": "Bad relation",
         }
 
-        response = self.client.post("/api/v1/soil/measurements/", payload, format="json")
+        response = self.client.post(
+            "/api/v1/soil/measurements/", payload, format="json"
+        )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("yield_record", response.data)
 

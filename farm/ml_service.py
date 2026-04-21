@@ -1,4 +1,5 @@
 import json
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -12,55 +13,60 @@ MODEL_DIR = Path(settings.BASE_DIR) / "ml_artifacts"
 MODEL_PATH = MODEL_DIR / "yield_catboost_model.cbm"
 META_PATH = MODEL_DIR / "yield_catboost_model_meta.json"
 
+IRRIGATION_MAP = {
+    "drip": "drip",
+    "sprinkler": "sprinkler",
+    "manual": "manual",
+    "flood": "flood",
+    "rain-fed": "rainfed",
+    "rain fed": "rainfed",
+    "rainfed": "rainfed",
+}
 
-def normalize_irrigation(value):
-    value = str(value or "").strip().lower()
-    mapping = {
-        "drip": "drip",
-        "sprinkler": "sprinkler",
-        "manual": "manual",
-        "flood": "flood",
-        "rain-fed": "rainfed",
-        "rain fed": "rainfed",
-        "rainfed": "rainfed",
-    }
-    return mapping.get(value, "other")
+SOIL_MAP = {
+    "loamy": "loamy",
+    "sandy": "sandy",
+    "clay": "clay",
+    "silty": "silty",
+    "peaty": "peaty",
+}
 
-
-def normalize_soil(value):
-    value = str(value or "").strip().lower()
-    mapping = {
-        "loamy": "loamy",
-        "sandy": "sandy",
-        "clay": "clay",
-        "silty": "silty",
-        "peaty": "peaty",
-    }
-    return mapping.get(value, "other")
+SEASON_MAP = {
+    "kharif": "kharif",
+    "rabi": "rabi",
+    "zaid": "zaid",
+}
 
 
-def normalize_season(value):
-    value = str(value or "").strip().lower()
-    mapping = {
-        "kharif": "kharif",
-        "rabi": "rabi",
-        "zaid": "zaid",
-    }
-    return mapping.get(value, "other")
+def _normalize(value, mapping: dict[str, str], default: str = "other") -> str:
+    key = str(value or "").strip().lower()
+    return mapping.get(key, default)
 
 
-def load_model_and_metadata():
+def normalize_irrigation(value) -> str:
+    return _normalize(value, IRRIGATION_MAP)
+
+
+def normalize_soil(value) -> str:
+    return _normalize(value, SOIL_MAP)
+
+
+def normalize_season(value) -> str:
+    return _normalize(value, SEASON_MAP)
+
+
+@lru_cache(maxsize=1)
+def load_model_and_metadata() -> tuple[CatBoostRegressor, dict]:
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
-
     if not META_PATH.exists():
         raise FileNotFoundError(f"Metadata file not found: {META_PATH}")
 
     model = CatBoostRegressor()
     model.load_model(str(MODEL_PATH))
 
-    with open(META_PATH, "r", encoding="utf-8") as f:
-        metadata = json.load(f)
+    with open(META_PATH, "r", encoding="utf-8") as fh:
+        metadata = json.load(fh)
 
     return model, metadata
 
@@ -79,9 +85,13 @@ def build_features_from_yield_record(
         "water_usage_cubic_meters": float(record.water_usage_cubic_meters),
     }
 
-    df = pd.DataFrame([data])
-    df = df[feature_columns]
-    return df
+    missing = [c for c in feature_columns if c not in data]
+    if missing:
+        raise KeyError(
+            f"Model expects feature columns that are not produced here: {missing}"
+        )
+
+    return pd.DataFrame([data])[feature_columns]
 
 
 def predict_yield_for_record(record: YieldRecord) -> dict:

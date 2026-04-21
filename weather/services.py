@@ -84,7 +84,9 @@ def summarize_forecast(data: dict) -> dict:
         "rain_next_7d_mm": round(rain_7d, 2),
         "max_rain_probability_24h": round(max_prob_24, 2),
         "evapotranspiration_24h": round(eto_24, 2),
-        "avg_temperature_24h": round(avg_temp_24, 2) if avg_temp_24 is not None else None,
+        "avg_temperature_24h": (
+            round(avg_temp_24, 2) if avg_temp_24 is not None else None
+        ),
         "next_dry_window": find_next_dry_window(hourly),
     }
 
@@ -124,7 +126,9 @@ def get_latest_weather_snapshot(field) -> WeatherSnapshot | None:
     return WeatherSnapshot.objects.filter(field=field).order_by("-created_at").first()
 
 
-def is_weather_snapshot_stale(snapshot: WeatherSnapshot | None, max_age_hours: int = 18) -> bool:
+def is_weather_snapshot_stale(
+    snapshot: WeatherSnapshot | None, max_age_hours: int = 18
+) -> bool:
     if not snapshot:
         return True
 
@@ -153,7 +157,9 @@ def create_weather_snapshot_for_field(field) -> WeatherSnapshot:
     )
 
 
-def ensure_fresh_weather_snapshot(field, max_age_hours: int = 18, force_refresh: bool = False) -> WeatherSnapshot:
+def ensure_fresh_weather_snapshot(
+    field, max_age_hours: int = 18, force_refresh: bool = False
+) -> WeatherSnapshot:
     latest = get_latest_weather_snapshot(field)
 
     if force_refresh or is_weather_snapshot_stale(latest, max_age_hours=max_age_hours):
@@ -162,7 +168,9 @@ def ensure_fresh_weather_snapshot(field, max_age_hours: int = 18, force_refresh:
     return latest
 
 
-def create_irrigation_recommendation_for_field(field, weather_snapshot: WeatherSnapshot | None = None) -> IrrigationRecommendation:
+def create_irrigation_recommendation_for_field(
+    field, weather_snapshot: WeatherSnapshot | None = None
+) -> IrrigationRecommendation:
     snapshot = weather_snapshot or create_weather_snapshot_for_field(field)
 
     soil_context = get_latest_soil_context(field)
@@ -218,7 +226,9 @@ def ensure_fresh_irrigation_recommendation(
     latest_snapshot = get_latest_weather_snapshot(field)
     latest_recommendation = get_latest_irrigation_recommendation(field)
 
-    snapshot_stale = is_weather_snapshot_stale(latest_snapshot, max_age_hours=max_age_hours)
+    snapshot_stale = is_weather_snapshot_stale(
+        latest_snapshot, max_age_hours=max_age_hours
+    )
     recommendation_stale = is_irrigation_recommendation_stale(
         latest_recommendation,
         max_age_hours=max_age_hours,

@@ -22,7 +22,16 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .irrigation_service import calculate_watering_status, get_field_weather_forecast
 from .ml_service import predict_yield_for_record
-from .models import ActivityLog, Animal, Crop, EmailOTP, Farm, Field, UserProfile, YieldRecord
+from .models import (
+    ActivityLog,
+    Animal,
+    Crop,
+    EmailOTP,
+    Farm,
+    Field,
+    UserProfile,
+    YieldRecord,
+)
 from .serializers import (
     ActivityLogSerializer,
     AnimalSerializer,
@@ -290,7 +299,9 @@ class LogoutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        return Response({"detail": "Logged out successfully."}, status=status.HTTP_200_OK)
+        return Response(
+            {"detail": "Logged out successfully."}, status=status.HTTP_200_OK
+        )
 
 
 class PredictYieldView(APIView):
@@ -410,9 +421,9 @@ class IoTDevicesTelemetryView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        ordered_readings = SoilMeasurement.objects.filter(field_id__in=field_ids).order_by(
-            "field_id", "-sample_date", "-created_at"
-        )
+        ordered_readings = SoilMeasurement.objects.filter(
+            field_id__in=field_ids
+        ).order_by("field_id", "-sample_date", "-created_at")
 
         devices = []
         online_count = 0
@@ -487,7 +498,14 @@ class AIAnalyzeView(APIView):
         }
         ndvi_keywords = {"ndvi", "вегетац", "культур", "crop", "satellite", "спутник"}
         animal_keywords = {"animal", "livestock", "живот", "скот", "здоров"}
-        greeting_keywords = {"привет", "здравствуйте", "hello", "hi", "ассистент", "помощ"}
+        greeting_keywords = {
+            "привет",
+            "здравствуйте",
+            "hello",
+            "hi",
+            "ассистент",
+            "помощ",
+        }
 
         if any(k in q for k in greeting_keywords):
             return "greeting"
@@ -526,7 +544,9 @@ class AIAnalyzeView(APIView):
             "Уточните вопрос про полив, NDVI или здоровье животных для более точного ответа."
         )
 
-    def _format_water_answer(self, request, telemetry_online: int, telemetry_total: int) -> str:
+    def _format_water_answer(
+        self, request, telemetry_online: int, telemetry_total: int
+    ) -> str:
         fields = Field.objects.filter(farm__owner=request.user).select_related("farm")
         statuses = []
         for field in fields[:5]:
@@ -592,8 +612,12 @@ class AIAnalyzeView(APIView):
         if intent == "water":
             base.update(
                 {
-                    "severity": "high" if telemetry_online < telemetry_total else "medium",
-                    "priority": "high" if telemetry_online < telemetry_total else "medium",
+                    "severity": (
+                        "high" if telemetry_online < telemetry_total else "medium"
+                    ),
+                    "priority": (
+                        "high" if telemetry_online < telemetry_total else "medium"
+                    ),
                 }
             )
         elif intent == "ndvi":
@@ -631,9 +655,7 @@ class AIAnalyzeView(APIView):
         ]
 
     def _build_response(self, request, question: str):
-        question = (
-            question
-        ).strip()
+        question = (question or "").strip()
 
         farms_qs = Farm.objects.filter(owner=request.user)
         fields_qs = Field.objects.filter(farm__owner=request.user)
@@ -664,7 +686,9 @@ class AIAnalyzeView(APIView):
         intent = self._detect_intent(question)
 
         if intent == "water":
-            answer = self._format_water_answer(request, telemetry_online, telemetry_total)
+            answer = self._format_water_answer(
+                request, telemetry_online, telemetry_total
+            )
         elif intent == "ndvi":
             answer = self._format_ndvi_answer(request)
         elif intent == "animals":
@@ -729,7 +753,9 @@ class AIAnalyzeView(APIView):
         return self._build_response(request, question)
 
     def get(self, request):
-        question = request.query_params.get("question") or request.query_params.get("q") or ""
+        question = (
+            request.query_params.get("question") or request.query_params.get("q") or ""
+        )
         return self._build_response(request, question)
 
 
@@ -850,6 +876,8 @@ def me(request):
             "id": request.user.id,
             "username": request.user.username,
             "email": request.user.email,
-            "profile": UserProfileSerializer(profile, context={"request": request}).data,
+            "profile": UserProfileSerializer(
+                profile, context={"request": request}
+            ).data,
         }
     )

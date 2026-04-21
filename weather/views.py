@@ -113,9 +113,7 @@ class FieldLatestWeatherView(APIView):
         field = get_owned_field(request.user, field_id)
 
         snapshot = (
-            WeatherSnapshot.objects.filter(field=field)
-            .order_by("-created_at")
-            .first()
+            WeatherSnapshot.objects.filter(field=field).order_by("-created_at").first()
         )
 
         if not snapshot:
@@ -270,7 +268,9 @@ class FieldWeatherAdviceView(APIView):
                 "field_id": field.id,
                 "field_name": field.name,
                 "snapshot": WeatherSnapshotSerializer(snapshot).data,
-                "recommendation": IrrigationRecommendationSerializer(recommendation).data,
+                "recommendation": IrrigationRecommendationSerializer(
+                    recommendation
+                ).data,
             },
             status=status.HTTP_200_OK,
         )

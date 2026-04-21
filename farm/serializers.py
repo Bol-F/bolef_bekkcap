@@ -4,7 +4,16 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from .models import ActivityLog, Animal, Crop, EmailOTP, Farm, Field, UserProfile, YieldRecord
+from .models import (
+    ActivityLog,
+    Animal,
+    Crop,
+    EmailOTP,
+    Farm,
+    Field,
+    UserProfile,
+    YieldRecord,
+)
 
 User = get_user_model()
 
@@ -51,12 +60,16 @@ class FarmSerializer(serializers.ModelSerializer):
             return None
 
         if not isinstance(value, list) or len(value) < 4:
-            raise serializers.ValidationError("Polygon must have at least 4 coordinate pairs.")
+            raise serializers.ValidationError(
+                "Polygon must have at least 4 coordinate pairs."
+            )
 
         normalized = []
         for pt in value:
             if not isinstance(pt, list) or len(pt) != 2:
-                raise serializers.ValidationError(f"Each polygon point must be [lon, lat]. Got: {pt}")
+                raise serializers.ValidationError(
+                    f"Each polygon point must be [lon, lat]. Got: {pt}"
+                )
 
             lon, lat = pt
             if not (-180 <= lon <= 180):
@@ -77,7 +90,9 @@ class FarmSerializer(serializers.ModelSerializer):
         polygon = attrs.get("polygon", getattr(self.instance, "polygon", None))
 
         if (latitude is None) ^ (longitude is None):
-            raise ValidationError("Set both latitude and longitude, or leave both empty.")
+            raise ValidationError(
+                "Set both latitude and longitude, or leave both empty."
+            )
 
         if not polygon and latitude is None and longitude is None:
             raise ValidationError(
@@ -105,6 +120,7 @@ class FarmSerializer(serializers.ModelSerializer):
 
         center_lat = sum(p[1] for p in points) / len(points)
         import math
+
         lat_rad = math.radians(center_lat)
         meters_per_deg_lon = 111320 * math.cos(lat_rad)
         meters_per_deg_lat = 110540
@@ -156,12 +172,16 @@ class FieldSerializer(serializers.ModelSerializer):
             return None
 
         if not isinstance(value, list) or len(value) < 4:
-            raise serializers.ValidationError("Polygon must have at least 4 coordinate pairs.")
+            raise serializers.ValidationError(
+                "Polygon must have at least 4 coordinate pairs."
+            )
 
         normalized = []
         for pt in value:
             if not isinstance(pt, list) or len(pt) != 2:
-                raise serializers.ValidationError(f"Each polygon point must be [lon, lat]. Got: {pt}")
+                raise serializers.ValidationError(
+                    f"Each polygon point must be [lon, lat]. Got: {pt}"
+                )
 
             lon, lat = pt
             if not (-180 <= lon <= 180):
@@ -187,7 +207,9 @@ class FieldSerializer(serializers.ModelSerializer):
             raise ValidationError({"farm": "This field is required."})
 
         if (latitude is None) ^ (longitude is None):
-            raise ValidationError("Set both latitude and longitude, or leave both empty.")
+            raise ValidationError(
+                "Set both latitude and longitude, or leave both empty."
+            )
 
         if not polygon and latitude is None and longitude is None:
             raise ValidationError(
@@ -198,12 +220,24 @@ class FieldSerializer(serializers.ModelSerializer):
                 }
             )
 
-        if farm.size_hectares is not None and area is not None and float(area) > float(farm.size_hectares):
-            raise ValidationError({"area": "Field area cannot be bigger than farm size."})
+        if (
+            farm.size_hectares is not None
+            and area is not None
+            and float(area) > float(farm.size_hectares)
+        ):
+            raise ValidationError(
+                {"area": "Field area cannot be bigger than farm size."}
+            )
 
         if polygon and farm.polygon:
-            farm_polygon = farm.polygon[:-1] if farm.polygon and farm.polygon[0] == farm.polygon[-1] else farm.polygon
-            field_points = polygon[:-1] if polygon and polygon[0] == polygon[-1] else polygon
+            farm_polygon = (
+                farm.polygon[:-1]
+                if farm.polygon and farm.polygon[0] == farm.polygon[-1]
+                else farm.polygon
+            )
+            field_points = (
+                polygon[:-1] if polygon and polygon[0] == polygon[-1] else polygon
+            )
 
             for pt in field_points:
                 if not self._point_in_polygon(pt, farm_polygon):
@@ -213,8 +247,16 @@ class FieldSerializer(serializers.ModelSerializer):
 
             field_area = self._approx_polygon_area_ha(polygon)
             farm_area = getattr(farm, "polygon_area_approx_ha", None)
-            if field_area is not None and farm_area is not None and field_area > farm_area:
-                raise ValidationError({"polygon": "Field polygon area cannot be bigger than farm polygon area."})
+            if (
+                field_area is not None
+                and farm_area is not None
+                and field_area > farm_area
+            ):
+                raise ValidationError(
+                    {
+                        "polygon": "Field polygon area cannot be bigger than farm polygon area."
+                    }
+                )
 
         return attrs
 
@@ -255,6 +297,7 @@ class FieldSerializer(serializers.ModelSerializer):
 
         center_lat = sum(p[1] for p in points) / len(points)
         import math
+
         lat_rad = math.radians(center_lat)
         meters_per_deg_lon = 111320 * math.cos(lat_rad)
         meters_per_deg_lat = 110540
@@ -283,7 +326,9 @@ class CropSerializer(serializers.ModelSerializer):
         super().__init__(*args, **kwargs)
         request = self.context.get("request")
         if request and request.user.is_authenticated:
-            self.fields["field"].queryset = Field.objects.filter(farm__owner=request.user)
+            self.fields["field"].queryset = Field.objects.filter(
+                farm__owner=request.user
+            )
 
 
 class AnimalSerializer(serializers.ModelSerializer):
@@ -368,11 +413,17 @@ class ActivityLogSerializer(serializers.ModelSerializer):
             raise ValidationError({"farm": "This field is required."})
 
         if field and field.farm_id != farm.id:
-            raise ValidationError({"field": "Field does not belong to the selected farm."})
+            raise ValidationError(
+                {"field": "Field does not belong to the selected farm."}
+            )
         if crop and crop.field.farm_id != farm.id:
-            raise ValidationError({"crop": "Crop does not belong to the selected farm."})
+            raise ValidationError(
+                {"crop": "Crop does not belong to the selected farm."}
+            )
         if animal and animal.farm_id != farm.id:
-            raise ValidationError({"animal": "Animal does not belong to the selected farm."})
+            raise ValidationError(
+                {"animal": "Animal does not belong to the selected farm."}
+            )
 
         return attrs
 
@@ -432,7 +483,9 @@ class YieldRecordSerializer(serializers.ModelSerializer):
             raise ValidationError({"farm": "This field is required."})
 
         if field and field.farm_id != farm.id:
-            raise ValidationError({"field": "Field does not belong to the selected farm."})
+            raise ValidationError(
+                {"field": "Field does not belong to the selected farm."}
+            )
 
         return attrs
 
@@ -496,7 +549,9 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         if attrs["new_password"] != attrs["new_password2"]:
-            raise serializers.ValidationError({"new_password2": "Passwords must match."})
+            raise serializers.ValidationError(
+                {"new_password2": "Passwords must match."}
+            )
         validate_password(attrs["new_password"])
         attrs["email"] = (attrs["email"] or "").strip().lower()
         attrs["code"] = (attrs["code"] or "").strip()

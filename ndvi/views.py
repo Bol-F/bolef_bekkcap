@@ -468,6 +468,7 @@ class FieldNDVIMapView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+
 class FarmNDVIFetchAllView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -620,4 +621,3 @@ class FarmNDVIFetchAllView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-

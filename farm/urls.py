@@ -85,7 +85,9 @@ urlpatterns = [
     path("chat/", AIAnalyzeView.as_view(), name="ai-chat"),
     path("chat", AIAnalyzeView.as_view(), name="ai-chat-no-slash"),
     path("backend_analyze/", AIAnalyzeView.as_view(), name="ai-backend-analyze"),
-    path("backend_analyze", AIAnalyzeView.as_view(), name="ai-backend-analyze-no-slash"),
+    path(
+        "backend_analyze", AIAnalyzeView.as_view(), name="ai-backend-analyze-no-slash"
+    ),
     path(
         "iot/devices/telemetry/",
         IoTDevicesTelemetryView.as_view(),
@@ -99,7 +101,11 @@ urlpatterns = [
     path("iot/devices/", IoTDevicesTelemetryView.as_view(), name="iot-devices"),
     path("iot/devices", IoTDevicesTelemetryView.as_view(), name="iot-devices-no-slash"),
     path("iot/telemetry/", IoTDevicesTelemetryView.as_view(), name="iot-telemetry"),
-    path("iot/telemetry", IoTDevicesTelemetryView.as_view(), name="iot-telemetry-no-slash"),
+    path(
+        "iot/telemetry",
+        IoTDevicesTelemetryView.as_view(),
+        name="iot-telemetry-no-slash",
+    ),
     # CRUD routers
     path("", include(router.urls)),
 ]
