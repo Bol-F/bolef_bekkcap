@@ -467,3 +467,157 @@ class FieldNDVIMapView(APIView):
                 {"error": "Failed to generate NDVI map", "detail": str(exc)},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+
+class FarmNDVIFetchAllView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        operation_id="farm_ndvi_fetch_all",
+        request=FetchRequestSerializer,
+        responses={
+            200: OpenApiTypes.OBJECT,
+            400: ErrorResponseSerializer,
+            404: ErrorResponseSerializer,
+            502: ErrorResponseSerializer,
+        },
+        tags=["NDVI"],
+    )
+    def post(self, request, farm_id):
+        serializer = FetchRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        d_from = serializer.validated_data["date_from"]
+        d_to = serializer.validated_data["date_to"]
+        force_refresh = serializer.validated_data["force_refresh"]
+
+        fields = Field.objects.filter(
+            farm_id=farm_id,
+            farm__owner=request.user,
+        ).select_related("farm")
+
+        if not fields.exists():
+            return Response(
+                {"error": "No fields found for this farm."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        results = []
+        total_new_records = 0
+        total_skipped_existing = 0
+        failed_fields = 0
+
+        for field in fields:
+            center_lat, center_lon = _field_center(field)
+            polygon = _field_polygon_for_satellite(field)
+
+            if center_lat is None or center_lon is None:
+                results.append(
+                    {
+                        "field_id": field.id,
+                        "field_name": field.name,
+                        "status": "skipped",
+                        "reason": "Field location is not set.",
+                        "new_records": 0,
+                        "skipped_existing": 0,
+                    }
+                )
+                continue
+
+            if force_refresh:
+                NDVIRecord.objects.filter(
+                    field=field,
+                    date__gte=d_from,
+                    date__lte=d_to,
+                ).delete()
+
+            existing_dates = set(
+                NDVIRecord.objects.filter(
+                    field=field,
+                    date__gte=d_from,
+                    date__lte=d_to,
+                ).values_list("date", flat=True)
+            )
+
+            try:
+                raw = get_ndvi_data(
+                    center_lat=center_lat,
+                    center_lon=center_lon,
+                    date_from=str(d_from),
+                    date_to=str(d_to),
+                    polygon=polygon,
+                )
+            except Exception as exc:
+                logger.exception("NDVI bulk fetch failed for field %s", field.id)
+                failed_fields += 1
+                results.append(
+                    {
+                        "field_id": field.id,
+                        "field_name": field.name,
+                        "status": "failed",
+                        "reason": str(exc),
+                        "new_records": 0,
+                        "skipped_existing": 0,
+                    }
+                )
+                continue
+
+            to_create = []
+            skipped_existing = 0
+
+            for record in raw:
+                record_date = record["date"]
+
+                if record_date in {str(d) for d in existing_dates}:
+                    skipped_existing += 1
+                    continue
+
+                to_create.append(
+                    NDVIRecord(
+                        field=field,
+                        date=record_date,
+                        ndvi_mean=record["ndvi_mean"],
+                        ndvi_min=record.get("ndvi_min"),
+                        ndvi_max=record.get("ndvi_max"),
+                        ndvi_std=record.get("ndvi_std"),
+                        evi_mean=record.get("evi_mean"),
+                        tcg_mean=record.get("tcg_mean"),
+                        cloud_coverage=record.get("cloud_coverage"),
+                        status=classify_ndvi(record["ndvi_mean"]),
+                        source=record.get(
+                            "source",
+                            getattr(settings, "NDVI_DATA_SOURCE", "synthetic"),
+                        ),
+                    )
+                )
+                existing_dates.add(record_date)
+
+            created = NDVIRecord.objects.bulk_create(to_create, ignore_conflicts=True)
+
+            total_new_records += len(created)
+            total_skipped_existing += skipped_existing
+
+            results.append(
+                {
+                    "field_id": field.id,
+                    "field_name": field.name,
+                    "status": "ok",
+                    "new_records": len(created),
+                    "skipped_existing": skipped_existing,
+                }
+            )
+
+        return Response(
+            {
+                "farm_id": farm_id,
+                "date_from": str(d_from),
+                "date_to": str(d_to),
+                "fields_processed": len(results),
+                "failed_fields": failed_fields,
+                "total_new_records": total_new_records,
+                "total_skipped_existing": total_skipped_existing,
+                "results": results,
+            },
+            status=status.HTTP_200_OK,
+        )
+

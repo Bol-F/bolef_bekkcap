@@ -9,12 +9,14 @@ from rest_framework_simplejwt.views import (
 from .auth_views import GoogleLogin, exchange_google_code, set_password
 from .email_otp_views import send_email_code, verify_email_code
 from .views import (
+    AIAnalyzeView,
     ActivityLogViewSet,
     AnimalViewSet,
     CropViewSet,
     FarmViewSet,
     FieldViewSet,
     FieldWateringStatusView,
+    IoTDevicesTelemetryView,
     LogoutView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
@@ -78,6 +80,26 @@ urlpatterns = [
         FieldWateringStatusView.as_view(),
         name="field-watering-status",
     ),
+    path("analyze/", AIAnalyzeView.as_view(), name="ai-analyze"),
+    path("analyze", AIAnalyzeView.as_view(), name="ai-analyze-no-slash"),
+    path("chat/", AIAnalyzeView.as_view(), name="ai-chat"),
+    path("chat", AIAnalyzeView.as_view(), name="ai-chat-no-slash"),
+    path("backend_analyze/", AIAnalyzeView.as_view(), name="ai-backend-analyze"),
+    path("backend_analyze", AIAnalyzeView.as_view(), name="ai-backend-analyze-no-slash"),
+    path(
+        "iot/devices/telemetry/",
+        IoTDevicesTelemetryView.as_view(),
+        name="iot-devices-telemetry",
+    ),
+    path(
+        "iot/devices/telemetry",
+        IoTDevicesTelemetryView.as_view(),
+        name="iot-devices-telemetry-no-slash",
+    ),
+    path("iot/devices/", IoTDevicesTelemetryView.as_view(), name="iot-devices"),
+    path("iot/devices", IoTDevicesTelemetryView.as_view(), name="iot-devices-no-slash"),
+    path("iot/telemetry/", IoTDevicesTelemetryView.as_view(), name="iot-telemetry"),
+    path("iot/telemetry", IoTDevicesTelemetryView.as_view(), name="iot-telemetry-no-slash"),
     # CRUD routers
     path("", include(router.urls)),
 ]
